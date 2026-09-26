@@ -1,0 +1,1 @@
+"""STT infrastructure tests package."""

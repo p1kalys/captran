@@ -1,0 +1,97 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# C extensions
+*.obj
+*.o
+*.lib
+*.a
+*.dll
+*.pyd
+
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Packaging & Builds (PyInstaller, setuptools, wheels)
+build/
+dist/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Unit test / coverage / pytest
+.pytest_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+htmlcov/
+
+# Large Machine Learning Model Weights & Checkpoints (>100MB)
+# (Whisper weights are downloadable via scripts/prepare_offline_models.py)
+models/whisper/
+models/*.bin
+models/*.pt
+models/*.safetensors
+
+# Allow lightweight models & ONNX assets (<50MB) to be tracked in Git
+!models/*.onnx
+!models/silero_vad.onnx
+!models/*.gitkeep
+
+# Test audio dumps and recorded WAV files
+*.wav
+*.mp3
+*.flac
+*.aac
+*.m4a
+output_*.wav
+tests/data/sample_*.wav
+
+# User configuration & Local Settings Cache
+.captran/
+.ja-en-captioner/
+config.json
+
+# IDEs, Editors & OS Metadata
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# Environment Variables
+.env
+.env.local
+.env.*.local

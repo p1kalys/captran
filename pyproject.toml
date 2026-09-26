@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "captran"
+version = "0.1.0"
+description = "Hexagonal architecture offline Japanese-to-English live meeting captioner"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [
+    { name = "CapTran Contributors" }
+]
+dependencies = [
+    "argostranslate>=1.9.0",
+    "faster-whisper>=1.0.0",
+    "numpy>=1.24.0",
+    "onnxruntime>=1.16.0",
+    "pyaudiowpatch>=0.2.12.5; sys_platform == 'win32'",
+    "PySide6>=6.5.0",
+    "scipy>=1.11.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pyinstaller>=6.4.0",
+    "pytest>=8.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
