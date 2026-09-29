@@ -85,6 +85,19 @@ def test_latency_tracker_recording_and_stats() -> None:
     assert "[LATENCY] Utterance #2" in printed_lines[1]
 
 
+def test_latency_tracker_bounded_deque_and_disabled() -> None:
+    # 1. Test bounded maxlen
+    tracker = LatencyTracker(enabled=True, max_records=3)
+    for i in range(10):
+        tracker.record(10.0, 20.0, 5.0, 1.0, 26.0, 36.0, f"utterance {i}")
+    assert len(tracker._records) == 3
+
+    # 2. Test disabled recording (does not append to records)
+    disabled_tracker = LatencyTracker(enabled=False)
+    disabled_tracker.record(10.0, 20.0, 5.0, 1.0, 26.0, 36.0, "test")
+    assert len(disabled_tracker._records) == 0
+
+
 class DummyTranscriber(Transcriber):
     def transcribe(self, audio: AudioChunk) -> Sequence[TranscriptSegment]:
         time.sleep(0.01)  # small simulated latency

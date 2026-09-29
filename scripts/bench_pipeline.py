@@ -48,16 +48,20 @@ class MockSegmenter(SpeechSegmenter):
 
     def segment(self, chunk_stream):
         accumulated = b""
+        last_emitted_len = 0
+        step_bytes = 16000  # 500ms @ 16kHz 16-bit mono = 0.5 * 16000 * 2 = 16000 bytes
         t0 = time.time()
         for chunk in chunk_stream:
             accumulated += chunk.pcm_data
-            # emit rolling interim every ~500ms
-            if len(accumulated) >= 16000:
+            # emit rolling interim every 500ms of newly accumulated audio
+            if len(accumulated) - last_emitted_len >= step_bytes:
                 yield AudioChunk(pcm_data=accumulated, sample_rate=16000, timestamp=t0, is_final=False)
+                last_emitted_len = len(accumulated)
             # emit final when buffer reaches full utterance
             if len(accumulated) >= len(self._pcm):
                 yield AudioChunk(pcm_data=accumulated, sample_rate=16000, timestamp=t0, is_final=True)
                 accumulated = b""
+                last_emitted_len = 0
                 t0 = time.time()
 
 
@@ -86,6 +90,11 @@ class BenchmarkPresenter(CaptionPresenter):
 def run_decoupled_benchmark():
     sample_wav = Path("tests/data/sample_japanese.wav")
     with wave.open(str(sample_wav), "rb") as wf:
+        if wf.getframerate() != 16000 or wf.getnchannels() != 1 or wf.getsampwidth() != 2:
+            raise ValueError(
+                f"Sample WAV must be 16kHz mono 16-bit (got {wf.getframerate()}Hz, "
+                f"{wf.getnchannels()} channels, {wf.getsampwidth()} sample width)"
+            )
         pcm = wf.readframes(wf.getnframes())
 
     print("\n" + "=" * 70)
@@ -115,8 +124,20 @@ def run_decoupled_benchmark():
     # Start decoupled worker threads
     use_case.start()
 
-    # Wait for the mock audio stream to be processed through the threaded pipeline
-    time.sleep(12.0)
+    # Wait for the mock audio stream to finish and queues to drain before stopping
+    start_wait = time.time()
+    timeout = 30.0
+    while time.time() - start_wait < timeout:
+        audio_done = use_case._audio_thread is None or not use_case._audio_thread.is_alive()
+        queues_empty = (
+            use_case._audio_queue.empty()
+            and use_case._stt_queue.empty()
+            and use_case._translation_queue.empty()
+        )
+        if audio_done and queues_empty:
+            time.sleep(0.5)
+            break
+        time.sleep(0.1)
 
     # Stop pipeline
     use_case.stop()

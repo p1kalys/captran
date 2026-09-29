@@ -18,9 +18,15 @@ from src.domain.ports import CaptionPresenter
 class ConsoleCaptionPresenter(CaptionPresenter):
     """Terminal/CLI caption presenter supporting in-place interim updates."""
 
-    def __init__(self, show_timestamps: bool = True, prefix: str = "[EN] ") -> None:
+    def __init__(
+        self,
+        show_timestamps: bool = True,
+        prefix: str = "[EN] ",
+        dual_subtitles: bool = True,
+    ) -> None:
         self.show_timestamps = show_timestamps
         self.prefix = prefix
+        self.dual_subtitles = dual_subtitles
         self._last_line_len = 0
 
     def _get_terminal_width(self) -> int:
@@ -42,7 +48,7 @@ class ConsoleCaptionPresenter(CaptionPresenter):
             timestamp_str = f"[{time.strftime('%H:%M:%S')}] "
 
         ja_text = caption.original_text.strip() if getattr(caption, "original_text", "") else ""
-        if ja_text:
+        if self.dual_subtitles and ja_text:
             display_text = f"[JA] {ja_text}  ➔  [EN] {text}"
         else:
             display_text = f"{self.prefix}{text}"

@@ -37,9 +37,22 @@ class JsonCustomVocabularyRepository(CustomVocabularyRepository):
             if not isinstance(data, dict):
                 return CustomVocabulary()
 
-            prompt_terms = data.get("prompt_terms", [])
-            source_subs = data.get("source_substitutions", {})
-            target_subs = data.get("target_substitutions", {})
+            raw_prompt_terms = data.get("prompt_terms")
+            prompt_terms = [str(t) for t in raw_prompt_terms] if isinstance(raw_prompt_terms, list) else []
+
+            raw_source_subs = data.get("source_substitutions")
+            source_subs = (
+                {str(k): str(v) for k, v in raw_source_subs.items()}
+                if isinstance(raw_source_subs, dict)
+                else {}
+            )
+
+            raw_target_subs = data.get("target_substitutions")
+            target_subs = (
+                {str(k): str(v) for k, v in raw_target_subs.items()}
+                if isinstance(raw_target_subs, dict)
+                else {}
+            )
 
             return CustomVocabulary(
                 prompt_terms=prompt_terms,

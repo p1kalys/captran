@@ -14,11 +14,12 @@ Supports:
 - Running summary reporting every 30 seconds
 """
 
+from collections import deque
 from dataclasses import dataclass, field
 import logging
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Deque, Dict, List, Optional
 
 logger = logging.getLogger("captran.latency")
 
@@ -72,12 +73,13 @@ class LatencyTracker:
         enabled: bool = False,
         report_interval_s: float = 30.0,
         print_callback: Optional[Callable[[str], None]] = None,
+        max_records: int = 1000,
     ) -> None:
         self._enabled = enabled
         self._report_interval_s = max(0.01, report_interval_s)
         self._print_callback = print_callback or print
         self._lock = threading.Lock()
-        self._records: List[UtteranceLatency] = []
+        self._records: Deque[UtteranceLatency] = deque(maxlen=max_records)
         self._utterance_counter = 0
 
         self._reporter_thread: Optional[threading.Thread] = None
@@ -117,7 +119,8 @@ class LatencyTracker:
                 e2e_latency_ms=e2e_latency_ms,
                 text_preview=text_preview,
             )
-            self._records.append(record)
+            if self._enabled:
+                self._records.append(record)
 
         # Log per-stage duration for this utterance
         preview = f" ('{text_preview[:35]}...')" if text_preview else ""

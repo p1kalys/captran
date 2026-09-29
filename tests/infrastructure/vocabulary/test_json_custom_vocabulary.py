@@ -68,3 +68,26 @@ def test_json_custom_vocabulary_persistence() -> None:
         assert repo.get_initial_prompt() == "CapTran, FastAPI"
         assert repo.apply_source_substitutions("ファストAPIの紹介") == "FastAPIの紹介"
         assert repo.apply_target_substitutions("Introduction to fast api") == "Introduction to FastAPI"
+
+
+def test_json_custom_vocabulary_invalid_types_fallback() -> None:
+    import json
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        json_path = Path(tmp_dir) / "corrupt_vocab.json"
+        # Write corrupt types (e.g. prompt_terms as string, substitutions as list)
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "prompt_terms": "not a list",
+                    "source_substitutions": ["not", "a", "dict"],
+                    "target_substitutions": 12345,
+                },
+                f,
+            )
+
+        repo = JsonCustomVocabularyRepository(config_file_path=json_path)
+        loaded = repo.load()
+        assert loaded.prompt_terms == ()
+        assert loaded.source_substitutions == {}
+        assert loaded.target_substitutions == {}

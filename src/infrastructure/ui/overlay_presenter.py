@@ -8,6 +8,7 @@ Provides a modern, draggable, translucent, frameless, always-on-top subtitle ove
 """
 
 from collections import deque
+import html
 import sys
 from typing import Deque, Optional, Tuple
 
@@ -219,8 +220,8 @@ class CaptionOverlayWidget(QWidget):
 
         # Committed final rows
         for cap in self._final_captions:
-            en_text = cap.text
-            ja_text = cap.original_text.strip() if cap.original_text else ""
+            en_text = html.escape(cap.text)
+            ja_text = html.escape(cap.original_text.strip()) if cap.original_text else ""
 
             if self.dual_subtitles and ja_text:
                 # Side-by-side 2-column view
@@ -250,8 +251,8 @@ class CaptionOverlayWidget(QWidget):
         # Interim active line (updating live)
         if self._current_interim_caption is not None:
             interim_cap = self._current_interim_caption
-            en_text = interim_cap.text
-            ja_text = interim_cap.original_text.strip() if interim_cap.original_text else ""
+            en_text = html.escape(interim_cap.text)
+            ja_text = html.escape(interim_cap.original_text.strip()) if interim_cap.original_text else ""
 
             if self.dual_subtitles and ja_text:
                 rows_html.append(
@@ -277,10 +278,11 @@ class CaptionOverlayWidget(QWidget):
                     f"</tr>"
                 )
         elif self._current_interim_text:
+            interim_text = html.escape(self._current_interim_text)
             rows_html.append(
                 f"<tr>"
                 f"<td colspan='3' style='padding: 3px 0px; color: #90CAF9; font-size: {sz}px; font-style: italic; "
-                f"text-shadow: 0px 1px 3px rgba(0,0,0,0.9); line-height: 1.35;'>{self._current_interim_text} <span style='color: #64B5F6; font-size: {dot_sz}px;'>●</span></td>"
+                f"text-shadow: 0px 1px 3px rgba(0,0,0,0.9); line-height: 1.35;'>{interim_text} <span style='color: #64B5F6; font-size: {dot_sz}px;'>●</span></td>"
                 f"</tr>"
             )
 

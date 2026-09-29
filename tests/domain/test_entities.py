@@ -55,3 +55,27 @@ def test_caption_segment_immutability() -> None:
 
     with pytest.raises(FrozenInstanceError):
         caption.text = "Changed"  # type: ignore
+
+
+def test_custom_vocabulary_word_boundary_substitutions() -> None:
+    from src.domain.entities import CustomVocabulary
+
+    vocab = CustomVocabulary(
+        prompt_terms=["CapTran", "FastAPI"],
+        source_substitutions={"キャプ": "CapTran"},
+        target_substitutions={"cat": "feline", "AI": "Artificial Intelligence"},
+    )
+    assert vocab.get_initial_prompt() == "CapTran, FastAPI"
+    assert vocab.apply_source_substitutions("これはキャプです") == "これはCapTranです"
+
+    # Alphanumeric target substitutions should not replace inside longer words like "catch" or "TRAIN"
+    text = "The cat caught a mouse using AI tech and a CAT."
+    res = vocab.apply_target_substitutions(text)
+    assert res == "The feline caught a mouse using Artificial Intelligence tech and a feline."
+
+    # Backslashes in replacement values should be preserved literally
+    vocab_backslash = CustomVocabulary(
+        target_substitutions={"dir": r"C:\Users\path\test", "regex_ref": r"\1\g<0>"},
+    )
+    res_bs = vocab_backslash.apply_target_substitutions("Check the dir and regex_ref here.")
+    assert res_bs == r"Check the C:\Users\path\test and \1\g<0> here."

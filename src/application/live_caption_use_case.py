@@ -352,10 +352,12 @@ class LiveCaptionUseCase:
                         except Empty:
                             break
                     for s_item in surviving_items:
-                        try:
-                            self._stt_queue.put_nowait(s_item)
-                        except Full:
-                            break
+                        while not self._stop_event.is_set():
+                            try:
+                                self._stt_queue.put(s_item, timeout=0.05)
+                                break
+                            except Full:
+                                continue
 
     def _audio_capture_loop(self) -> None:
         """Worker Thread 1: Captures audio stream from AudioSource and queues to _audio_queue."""
@@ -409,10 +411,12 @@ class LiveCaptionUseCase:
                     )
 
         # Signal downstream that audio stream is finished
-        try:
-            self._audio_queue.put(None, timeout=0.2)
-        except Exception:
-            pass
+        while not self._stop_event.is_set():
+            try:
+                self._audio_queue.put(None, timeout=0.1)
+                break
+            except Full:
+                continue
 
     def _vad_segmentation_loop(self) -> None:
         """Worker Thread 2: Reads raw chunks, runs VAD segmentation, and queues utterances to _stt_queue."""
@@ -444,10 +448,12 @@ class LiveCaptionUseCase:
                 self._report_status("degraded", f"VAD segmentation error: {vad_err}")
 
         # Signal STT worker that VAD stream finished
-        try:
-            self._stt_queue.put(None, timeout=0.2)
-        except Exception:
-            pass
+        while not self._stop_event.is_set():
+            try:
+                self._stt_queue.put(None, timeout=0.1)
+                break
+            except Full:
+                continue
 
     def _stt_transcription_loop(self) -> None:
         """Worker Thread 3: Transcribes utterances, dispatches interims immediately, queues finals to MT."""
@@ -470,7 +476,11 @@ class LiveCaptionUseCase:
                         newer_item = self._stt_queue.get_nowait()
                         self._stt_queue.task_done()
                         if newer_item is None:
-                            item = None
+                            # Re-enqueue None so the worker loop terminates after processing current utterance
+                            try:
+                                self._stt_queue.put_nowait(None)
+                            except Full:
+                                pass
                             break
                         item = newer_item
                         utterance, t_vad_complete, audio_to_vad_ms = item
@@ -602,10 +612,12 @@ class LiveCaptionUseCase:
             self._stt_queue.task_done()
 
         # Signal Translation worker
-        try:
-            self._translation_queue.put(None, timeout=0.2)
-        except Exception:
-            pass
+        while not self._stop_event.is_set():
+            try:
+                self._translation_queue.put(None, timeout=0.1)
+                break
+            except Full:
+                continue
 
     def _translation_loop(self) -> None:
         """Worker Thread 4: Translates final segments and commits final subtitles to CaptionPresenter."""

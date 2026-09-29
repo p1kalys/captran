@@ -17,6 +17,11 @@ from src.infrastructure.stt.faster_whisper_stt import FasterWhisperTranscriber
 def main() -> None:
     sample_wav = Path("tests/data/sample_japanese.wav")
     with wave.open(str(sample_wav), "rb") as wf:
+        if wf.getframerate() != 16000 or wf.getnchannels() != 1 or wf.getsampwidth() != 2:
+            raise ValueError(
+                f"Sample WAV must be 16kHz mono 16-bit (got {wf.getframerate()}Hz, "
+                f"{wf.getnchannels()} channels, {wf.getsampwidth()} sample width)"
+            )
         pcm = wf.readframes(wf.getnframes())
     chunk = AudioChunk(pcm_data=pcm, sample_rate=16000, timestamp=time.time() - 1.5)
 
@@ -32,11 +37,12 @@ def main() -> None:
         compute_type="auto",
     )
     t_small.ensure_ready()
-    tracker_small = LatencyTracker(enabled=False)
+    tracker_small = LatencyTracker(enabled=True, print_callback=lambda _: None)
     uc_small = LiveCaptionUseCase(transcriber=t_small, latency_tracker=tracker_small)
 
     # Warmup
     uc_small.process_utterance(chunk)
+    tracker_small.reset()
     # Benchmark runs
     for _ in range(5):
         uc_small.process_utterance(chunk)
@@ -46,26 +52,26 @@ def main() -> None:
     print(f"  [Small] p50: {s_small.p50:.1f}ms | p95: {s_small.p95:.1f}ms | Min: {s_small.min:.1f}ms | Avg: {s_small.avg:.1f}ms")
 
     # 2. Faster-Whisper Base (Fallback option for lower-end hardware)
-    print("\nEvaluating: Faster-Whisper 'base' (fallback_to_base=True, INT8 CPU)...")
+    print("\nEvaluating: Faster-Whisper 'base' (INT8 CPU)...")
     t_base = FasterWhisperTranscriber(
-        model_size="small",
-        fallback_to_base=True,
+        model_size="base",
         device="auto",
         compute_type="auto",
     )
     t_base.ensure_ready()
-    tracker_base = LatencyTracker(enabled=False)
+    tracker_base = LatencyTracker(enabled=True, print_callback=lambda _: None)
     uc_base = LiveCaptionUseCase(transcriber=t_base, latency_tracker=tracker_base)
 
     # Warmup
     uc_base.process_utterance(chunk)
+    tracker_base.reset()
     # Benchmark runs
     for _ in range(5):
         uc_base.process_utterance(chunk)
 
     stats_base = tracker_base.get_stage_stats()
     s_base = stats_base["STT (Faster-Whisper)"]
-    print(f"  [Base Fallback] p50: {s_base.p50:.1f}ms | p95: {s_base.p95:.1f}ms | Min: {s_base.min:.1f}ms | Avg: {s_base.avg:.1f}ms")
+    print(f"  [Base] p50: {s_base.p50:.1f}ms | p95: {s_base.p95:.1f}ms | Min: {s_base.min:.1f}ms | Avg: {s_base.avg:.1f}ms")
 
     # 3. Faster-Whisper Tiny (Ultra low-latency)
     print("\nEvaluating: Faster-Whisper 'tiny' (INT8 CPU)...")
@@ -75,11 +81,12 @@ def main() -> None:
         compute_type="auto",
     )
     t_tiny.ensure_ready()
-    tracker_tiny = LatencyTracker(enabled=False)
+    tracker_tiny = LatencyTracker(enabled=True, print_callback=lambda _: None)
     uc_tiny = LiveCaptionUseCase(transcriber=t_tiny, latency_tracker=tracker_tiny)
 
     # Warmup
     uc_tiny.process_utterance(chunk)
+    tracker_tiny.reset()
     # Benchmark runs
     for _ in range(5):
         uc_tiny.process_utterance(chunk)
@@ -94,7 +101,7 @@ def main() -> None:
     print(f" {'Configuration':<30} | {'p50 (ms)':>9} | {'p95 (ms)':>9} | {'Min (ms)':>9} | {'Avg (ms)':>9}")
     print("-" * 65)
     print(f" {'small (Default, INT8)':<30} | {s_small.p50:>9.1f} | {s_small.p95:>9.1f} | {s_small.min:>9.1f} | {s_small.avg:>9.1f}")
-    print(f" {'base (Fallback, INT8)':<30} | {s_base.p50:>9.1f} | {s_base.p95:>9.1f} | {s_base.min:>9.1f} | {s_base.avg:>9.1f}")
+    print(f" {'base (INT8)':<30} | {s_base.p50:>9.1f} | {s_base.p95:>9.1f} | {s_base.min:>9.1f} | {s_base.avg:>9.1f}")
     print(f" {'tiny (Ultra-low latency)':<30} | {s_tiny.p50:>9.1f} | {s_tiny.p95:>9.1f} | {s_tiny.min:>9.1f} | {s_tiny.avg:>9.1f}")
     print("=" * 65 + "\n")
 

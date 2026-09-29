@@ -30,3 +30,26 @@ def test_console_presenter_interim_and_final_output() -> None:
         assert "\n" in out2
     finally:
         sys.stdout = old_stdout
+
+
+def test_console_presenter_dual_subtitles() -> None:
+    captured_stdout = io.StringIO()
+    old_stdout = sys.stdout
+    sys.stdout = captured_stdout
+
+    try:
+        # 1. Dual subtitles enabled
+        presenter_dual = ConsoleCaptionPresenter(show_timestamps=False, dual_subtitles=True)
+        cap = CaptionSegment(text="Hello world", original_text="こんにちは世界", is_final=True)
+        presenter_dual.present(cap)
+        assert "[JA] こんにちは世界  ➔  [EN] Hello world" in captured_stdout.getvalue()
+
+        # 2. Dual subtitles disabled
+        captured_stdout.truncate(0)
+        captured_stdout.seek(0)
+        presenter_single = ConsoleCaptionPresenter(show_timestamps=False, dual_subtitles=False)
+        presenter_single.present(cap)
+        assert "[EN] Hello world" in captured_stdout.getvalue()
+        assert "[JA]" not in captured_stdout.getvalue()
+    finally:
+        sys.stdout = old_stdout

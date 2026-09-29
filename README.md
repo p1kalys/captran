@@ -7,34 +7,46 @@
 
 **CapTran** is a high-performance, **100% offline, privacy-first Japanese-to-English live meeting and audio captioner** built with clean Hexagonal Architecture (Ports and Adapters). 
 
-It captures live system audio (meetings, browser tabs, video streams, YouTube, or podcasts) via Windows WASAPI Loopback, detects speech utterances in real time using local **Silero VAD**, performs direct end-to-end speech translation via CTranslate2-accelerated **Faster-Whisper (INT8 optimized)**, and renders live subtitles on a modern translucent, draggable overlay.
+It captures live system audio (meetings, browser tabs, video streams, YouTube, or podcasts) via Windows WASAPI Loopback, detects speech utterances in real time using local **Silero VAD**, transcribes Japanese speech with CTranslate2-accelerated **Faster-Whisper (INT8 optimized)**, translates to English offline with **Argos Translate**, and renders live side-by-side subtitles on a modern translucent, draggable overlay.
 
 ---
 
 ## 🌟 Key Features
 
-- **100% Offline & Private:** Zero cloud API calls or runtime data leakage. All neural network inferences run locally.
+- **100% Offline & Private:** Zero cloud API calls or runtime network traffic. All neural network inferences (VAD, STT, and Machine Translation) run locally on device.
+- **Side-by-Side Dual Subtitles (JA ➔ EN):**
+  - Displays original Japanese speech (`[JA]`) and translated English (`[EN]`) side-by-side in real-time.
+  - Live rolling interim streaming with visual pulsing indicator (`●`) that stabilizes into finalized subtitles.
+- **Decoupled Multi-Threaded Pipeline with Backpressure:**
+  - Independent producer-consumer worker threads for Audio Capture, VAD Segmentation, STT Transcription, and Machine Translation.
+  - Smart interim snapshot coalescing prevents STT backlog drift during continuous speech while ensuring final utterances are never dropped.
 - **Ultra-Low Latency Inference:**
-  - Quantized **INT8 computation** leveraging AVX2/AVX-512 vector acceleration.
+  - Quantized **INT8 computation** on CPU (leveraging multi-core AVX2/AVX-512) and auto-detection of CUDA **float16** on NVIDIA GPUs.
   - Greedy decoding (`beam_size=1`) and adaptive VAD slicing (~250ms latency).
-- **Direct Speech Translation:** Uses Whisper's native `ja->en` speech-to-text translation model for conversational fluency.
-- **System Audio Loopback:** Captures internal speaker and Bluetooth/headset output directly without needing a physical microphone.
+- **Custom Domain Vocabulary & Dictionary:**
+  - Local JSON-backed dictionary (`~/.ja-en-captioner/custom_vocab.json`).
+  - Passes prompt hints to Faster-Whisper and applies pre/post-translation substitutions with regex word-boundary isolation.
+- **Diagnostic Latency Instrumentation:**
+  - High-resolution per-stage timing tracking (Audio->VAD, STT, Translation, Display, E2E).
+  - Background reporter generating running p50/p95 statistical summary tables every 30 seconds via `--debug-latency`.
+- **System Audio Loopback:** Captures internal speaker, headphone, and Bluetooth headset audio directly without requiring a physical microphone.
 - **Dual Presentation Modes:**
-  - **Modern GUI:** Draggable, translucent, always-on-top glassmorphic overlay + dark-themed Control Panel.
-  - **Headless CLI:** Terminal-based overwrite presenter with timestamp logs for low-overhead or remote environments.
-- **Hexagonal Architecture:** Domain core is strictly decoupled from third-party libraries (PySide6, faster-whisper, onnxruntime, pyaudiowpatch) via pure Python ports.
+  - **Modern GUI:** Draggable, translucent, always-on-top glassmorphic overlay + dark-themed Control Panel with HTML sanitization.
+  - **Headless CLI:** Terminal-based overwrite presenter with side-by-side formatting and timestamp logging.
 
 ---
 
 ## 🏛️ Pipeline Architecture
 
 ```mermaid
-flowchart LR
-    A["System Audio / Headset (WASAPI Loopback)"] -->|16kHz Mono PCM| B["Silero VAD ONNX (Speech Segmenter)"]
-    B -->|Utterance Chunks| C["Faster-Whisper STT (Direct Translation INT8)"]
-    C -->|English Captions| D["Caption Presenter"]
-    D --> E1["PySide6 Floating Overlay"]
-    D --> E2["Terminal CLI Presenter"]
+flowchart TD
+    A["System Audio / Headset (WASAPI Loopback)"] -->|Audio Queue| B["Silero VAD ONNX (Speech Segmenter)"]
+    B -->|STT Queue (Interim Coalescing)| C["Faster-Whisper (CTranslate2 INT8)"]
+    C -->|Interim Streaming| E["Caption Presenter (Side-by-Side)"]
+    C -->|Translation Queue| D["Argos Translate (Offline ja->en MT)"]
+    D -->|Final Subtitles| E
+    E --> F1["PySide6 Floating Overlay ([JA] ➔ [EN])"]
+    E --> F2["Terminal CLI Presenter"]
 ```
 
 ---
@@ -65,8 +77,9 @@ pip install -e .
 Before running for the first time, prepare local model weights:
 
 ```powershell
-# Pre-download Silero VAD and Whisper models ('tiny' and 'small')
+# Pre-download Silero VAD, Whisper models, and Argos Translate ja->en package
 python scripts/prepare_offline_models.py
+python scripts/install_translation_model.py
 ```
 
 ---
@@ -74,25 +87,26 @@ python scripts/prepare_offline_models.py
 ## 💻 How to Run
 
 ### Mode 1: Graphical User Interface (Default)
-Launch the desktop control window and draggable subtitle overlay:
+Launch the desktop control window and draggable side-by-side subtitle overlay:
 
 ```powershell
 python main.py
 ```
 - **Select Audio Device:** Choose your default speakers or connected headphones/Bluetooth headset from the dropdown.
-- **Select Model Size:** Choose between `tiny` (fastest) and `small` (higher accuracy).
+- **Select Model Size:** Choose between `tiny` (fastest), `base` (balanced real-time), and `small` (high accuracy).
+- **Dual Subtitles:** Toggle side-by-side Japanese and English subtitles.
 - **Start/Stop:** Click **Start Live Captioning** to begin streaming.
 
 ---
 
 ### Mode 2: Terminal / Headless CLI Mode
-For developers or lightweight terminal usage:
+For developers, servers, or lightweight terminal usage:
 
 ```powershell
-# Fast real-time translation using 'tiny' model
-python main.py --cli --model-size tiny
+# Fast real-time streaming using 'base' model with latency diagnostics
+python main.py --cli --model-size base --debug-latency
 
-# Higher accuracy translation using 'small' model
+# High-accuracy translation using 'small' model
 python main.py --cli --model-size small
 ```
 
@@ -114,7 +128,7 @@ If using headphones or Bluetooth earbuds:
 
 2. **Run specifically on your headset (e.g., Device 17):**
    ```powershell
-   python main.py --cli --device-index 17 --model-size tiny
+   python main.py --cli --device-index 17 --model-size base
    ```
 
 ---
@@ -127,25 +141,34 @@ If using headphones or Bluetooth earbuds:
 | `--list-devices` | `False` | Enumerate available WASAPI loopback audio capture devices and exit |
 | `--device-index` | `Auto` | WASAPI loopback device index (auto-detects active audio output) |
 | `--model-size` | `small` | Faster-Whisper model size (`tiny`, `base`, `small`) |
+| `--device` | `auto` | Compute device for Whisper (`auto`, `cpu`, `cuda`) |
 | `--compute-type` | `int8` | Model quantization (`int8`, `float16`, `float32`, `default`) |
 | `--beam-size` | `1` | Beam search size (`1` for real-time greedy decoding) |
 | `--vad-threshold` | `0.4` | Silero VAD speech activation sensitivity (0.1 to 0.9) |
 | `--silence-timeout`| `250.0` | Silence duration (ms) to finalize an utterance chunk |
-| `--task` | `translate`| Whisper task: `translate` (direct JA->EN) or `transcribe` |
+| `--task` | `transcribe`| Whisper task: `transcribe` (Japanese STT + Argos Translation for dual subtitles) or `translate` (direct EN) |
+| `--debug-latency` | `False` | Enable high-resolution stage timing instrumentation and running p50/p95 periodic reports |
+| `--fallback-to-base`| `False` | Automatically fall back to base Whisper model on resource-constrained systems |
 | `--no-timestamps` | `False` | Omit timestamp prefixes in CLI mode |
 
 ---
 
-## 🧪 Running Tests
+## 🧪 Running Tests & Benchmarks
 
-CapTran includes unit and integration test suites with zero external cloud dependencies:
+CapTran includes a comprehensive unit and integration test suite with zero external cloud dependencies:
 
 ```powershell
-# Run all unit tests
+# Run full automated test suite (59 tests)
 pytest
 
 # Run tests with verbose output
 pytest -v
+
+# Run latency stage benchmark comparison
+python scripts/bench_latency.py
+
+# Run decoupled pipeline end-to-end benchmark
+python scripts/bench_pipeline.py
 ```
 
 ---
@@ -160,6 +183,7 @@ pip install -e .[dev]
 
 # 2. Stage offline model weights
 python scripts/prepare_offline_models.py
+python scripts/install_translation_model.py
 
 # 3. Build executable
 pyinstaller captran.spec --clean --noconfirm
@@ -174,22 +198,35 @@ The resulting standalone distribution will be generated inside `dist/captran/cap
 ```text
 captran/
 ├── main.py                     # Primary Application Entry Point (CLI/GUI dispatch)
-├── pyproject.toml              # Build config and dependencies
+├── pyproject.toml              # Build configuration and project dependencies
 ├── LICENSE                     # MIT Open Source License
 ├── ARCHITECTURE.md             # Comprehensive Hexagonal Architecture documentation
 ├── BUILD_WINDOWS.md            # Windows Standalone PyInstaller build instructions
-├── captran.spec                # PyInstaller specification file
+├── captran.spec                # PyInstaller build specification
 ├── models/                     # Local offline weights directory
-│   ├── silero_vad.onnx         # Offline Silero VAD model
-│   └── whisper/                # CTranslate2 Whisper model cache
-├── scripts/                    # Helper scripts
+│   ├── silero_vad.onnx         # Offline Silero VAD ONNX model
+│   ├── whisper/                # CTranslate2 Whisper model cache
+│   └── argos_packages/         # Offline Argos Translate packages
+├── scripts/                    # Utilities and benchmarking tools
 │   ├── prepare_offline_models.py
 │   ├── install_translation_model.py
+│   ├── bench_latency.py
+│   ├── bench_pipeline.py
 │   └── test_capture_windows.py
 ├── src/
 │   ├── domain/                 # Pure domain entities, value objects & abstract ports
-│   ├── application/            # Orchestration & LiveCaptionUseCase
-│   ├── infrastructure/         # Concrete adapters (WASAPI, VAD, Whisper, GUI, CLI)
+│   │   ├── entities.py         # AudioChunk, TranscriptSegment, CaptionSegment, CustomVocabulary
+│   │   └── ports.py            # AudioSource, SpeechSegmenter, Transcriber, Translator, CaptionPresenter
+│   ├── application/            # Orchestration & Use Cases
+│   │   ├── live_caption_use_case.py # Decoupled multi-threaded pipeline with backpressure
+│   │   └── latency_tracker.py       # Diagnostic stage timing and p50/p95 metrics
+│   ├── infrastructure/         # Concrete adapters (WASAPI, VAD, Whisper, Argos, GUI, CLI)
+│   │   ├── audio/              # WASAPI loopback capture adapter and factory
+│   │   ├── stt/                # FasterWhisperTranscriber (CPU int8 / CUDA float16)
+│   │   ├── translation/        # ArgosTranslateTranslator (Local ja->en MT)
+│   │   ├── ui/                 # OverlayPresenter (PySide6) and ConsolePresenter
+│   │   ├── vocabulary/         # JsonCustomVocabularyRepository adapter
+│   │   └── settings/           # LocalSettingsRepository (~/.ja-en-captioner/config.json)
 │   ├── composition_root.py     # Clean dependency injection root
 │   ├── composition_root_cli.py # CLI application assembler
 │   └── composition_root_gui.py # PySide6 GUI application assembler

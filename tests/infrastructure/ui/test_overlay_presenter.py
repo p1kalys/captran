@@ -82,3 +82,25 @@ def test_overlay_presenter_dual_subtitles_stacked_rendering() -> None:
     assert widget.dual_subtitles is False
     assert "Hello final sentence" in widget.text_label.text()
     assert "こんにちは世界" not in widget.text_label.text()
+
+
+def test_overlay_presenter_html_escaping() -> None:
+    try:
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance() or QApplication(["test"])
+    except ImportError:
+        pytest.skip("PySide6 not installed")
+
+    widget = CaptionOverlayWidget(max_history_lines=3, dual_subtitles=True)
+
+    # Caption with raw HTML characters
+    cap = CaptionSegment(
+        text="<script>alert('xss')</script> & 'quotes'",
+        original_text="<タグ> & '引用'",
+        is_final=True,
+    )
+    widget.update_caption(cap)
+    rendered = widget.text_label.text()
+    assert "<script>" not in rendered
+    assert "&lt;script&gt;" in rendered
+    assert "&lt;タグ&gt;" in rendered

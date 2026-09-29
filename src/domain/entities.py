@@ -5,6 +5,7 @@ All entities and value objects are immutable dataclasses.
 """
 
 from dataclasses import dataclass, field
+import re
 import time
 from typing import Dict, Optional, Sequence, Tuple
 
@@ -201,13 +202,16 @@ class CustomVocabulary:
             return text
         res = text
         for pattern, repl in self.target_substitutions.items():
-            # Exact case-insensitive replacement if ASCII/Latin words
-            if pattern.lower() in res.lower():
-                import re
-                try:
-                    res = re.sub(re.escape(pattern), repl, res, flags=re.IGNORECASE)
-                except Exception:
-                    res = res.replace(pattern, repl)
+            if not pattern:
+                continue
+            # Build regex with word boundaries at alphanumeric edges
+            left_b = r"\b" if pattern[0].isalnum() or pattern[0] == "_" else ""
+            right_b = r"\b" if pattern[-1].isalnum() or pattern[-1] == "_" else ""
+            regex_pat = f"{left_b}{re.escape(pattern)}{right_b}"
+            try:
+                res = re.sub(regex_pat, lambda _m, r=repl: r, res, flags=re.IGNORECASE)
+            except Exception:
+                res = res.replace(pattern, repl)
         return res
 
 
