@@ -15,6 +15,9 @@ from src.infrastructure.audio.silero_vad import SileroVadSegmenter
 from src.infrastructure.stt.faster_whisper_stt import FasterWhisperTranscriber
 from src.infrastructure.translation.argos_translator import ArgosTranslateTranslator
 from src.infrastructure.ui.console_presenter import ConsoleCaptionPresenter
+from src.infrastructure.vocabulary.json_custom_vocabulary import (
+    JsonCustomVocabularyRepository,
+)
 
 
 @dataclass
@@ -27,6 +30,7 @@ class LiveCaptionerCLIApplication:
     transcriber: FasterWhisperTranscriber
     translator: ArgosTranslateTranslator
     presenter: ConsoleCaptionPresenter
+    vocabulary: JsonCustomVocabularyRepository
 
 
 def build_cli_application(
@@ -40,10 +44,13 @@ def build_cli_application(
     whisper_device: str = "auto",
     whisper_compute_type: str = "int8",
     whisper_download_root: str = "models/whisper",
-    whisper_task: str = "translate",
+    whisper_task: str = "transcribe",
     whisper_beam_size: int = 1,
     show_timestamps: bool = True,
     caption_prefix: str = "[EN] ",
+    debug_latency: bool = False,
+    fallback_to_base: bool = False,
+    custom_vocab_path: Optional[Path] = None,
 ) -> LiveCaptionerCLIApplication:
     """Instantiate concrete adapters and assemble the LiveCaptionUseCase."""
 
@@ -62,9 +69,14 @@ def build_cli_application(
         threshold=vad_threshold,
         min_speech_duration_ms=vad_min_speech_ms,
         silence_timeout_ms=vad_silence_timeout_ms,
+        emit_interim=True,
     )
 
-    # 3. Offline Speech-to-Text (CTranslate2 Whisper with direct translation or STT)
+    # 3. Custom Domain Vocabulary Adapter
+    vocabulary = JsonCustomVocabularyRepository(config_file_path=custom_vocab_path)
+    initial_prompt = vocabulary.get_initial_prompt()
+
+    # 4. Offline Speech-to-Text (CTranslate2 Whisper with direct translation or STT)
     transcriber = FasterWhisperTranscriber(
         model_size=whisper_model_size,
         device=whisper_device,
@@ -72,27 +84,31 @@ def build_cli_application(
         download_root=whisper_download_root,
         task=whisper_task,
         beam_size=whisper_beam_size,
+        fallback_to_base=fallback_to_base,
+        initial_prompt=initial_prompt if initial_prompt else None,
     )
 
-    # 4. Offline Translator (Argos Translate for fallback/transcribe mode)
+    # 5. Offline Translator (Argos Translate for fallback/transcribe mode)
     translator = ArgosTranslateTranslator(
         from_code="ja",
         to_code="en",
     )
 
-    # 5. Terminal UI Presenter
+    # 6. Terminal UI Presenter
     presenter = ConsoleCaptionPresenter(
         show_timestamps=show_timestamps,
         prefix=caption_prefix,
     )
 
-    # 6. Use Case Orchestrator
+    # 7. Use Case Orchestrator
     use_case = LiveCaptionUseCase(
         audio_source=audio_source,
         segmenter=segmenter,
         transcriber=transcriber,
         translator=translator,
         presenter=presenter,
+        vocabulary=vocabulary,
+        debug_latency=debug_latency,
     )
 
     return LiveCaptionerCLIApplication(
@@ -102,6 +118,7 @@ def build_cli_application(
         transcriber=transcriber,
         translator=translator,
         presenter=presenter,
+        vocabulary=vocabulary,
     )
 
 

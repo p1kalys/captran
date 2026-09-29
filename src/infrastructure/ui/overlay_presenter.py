@@ -47,13 +47,17 @@ class CaptionOverlayWidget(QWidget):
         max_history_lines: int = 3,
         font_size: int = 16,
         opacity: float = 0.85,
+        dual_subtitles: bool = True,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
         self.max_history_lines = max_history_lines
         self.font_size = font_size
         self.opacity = opacity
+        self.dual_subtitles = dual_subtitles
+        self._final_captions: Deque[CaptionSegment] = deque(maxlen=max_history_lines)
         self._final_lines: Deque[str] = deque(maxlen=max_history_lines)
+        self._current_interim_caption: Optional[CaptionSegment] = None
         self._current_interim_text = ""
         self._drag_pos = QPoint()
 
@@ -70,8 +74,8 @@ class CaptionOverlayWidget(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
-        self.setMinimumSize(600, 110)
-        self.resize(850, 130)
+        self.setMinimumSize(700, 110)
+        self.resize(960, 140)
 
     def _init_ui(self) -> None:
         """Create dark glassmorphic styling and labels."""
@@ -92,7 +96,7 @@ class CaptionOverlayWidget(QWidget):
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(0, 0, 0, 2)
 
-        self.title_label = QLabel("CAPTRAN | JAPANESE ➔ ENGLISH LIVE CAPTIONS (ja->en)", self.container)
+        self.title_label = QLabel("CAPTRAN | 🇯🇵 JAPANESE  ➔  🇬🇧 ENGLISH (SIDE-BY-SIDE LIVE)", self.container)
         self.title_label.setStyleSheet("""
             color: rgba(255, 255, 255, 0.45);
             font-size: 11px;
@@ -157,6 +161,8 @@ class CaptionOverlayWidget(QWidget):
         self.font_size = settings.overlay_font_size
         self.opacity = settings.overlay_opacity
         self.max_history_lines = settings.max_history_lines
+        self.dual_subtitles = getattr(settings, "dual_subtitles", True)
+        self._final_captions = deque(self._final_captions, maxlen=self.max_history_lines)
         self._final_lines = deque(self._final_lines, maxlen=self.max_history_lines)
         self._update_container_style()
         self._render_text()
@@ -186,41 +192,102 @@ class CaptionOverlayWidget(QWidget):
     @Slot(object)
     def update_caption(self, caption: CaptionSegment) -> None:
         """Update display with incoming caption segment."""
+        if isinstance(caption, str):
+            caption = CaptionSegment(text=caption, is_final=True)
+
         text = caption.text.strip()
         if not text:
             return
 
         if caption.is_final:
+            self._final_captions.append(caption)
             self._final_lines.append(text)
+            self._current_interim_caption = None
             self._current_interim_text = ""
         else:
+            self._current_interim_caption = caption
             self._current_interim_text = text
 
         self._render_text()
 
     def _render_text(self) -> None:
-        """Build HTML string with solid past lines and italicized/dimmed active interim line."""
-        lines_html = []
+        """Build HTML string with side-by-side (2-column) Japanese and English subtitles."""
         sz = self.font_size
+        badge_sz = max(10, sz - 4)
+        dot_sz = max(10, sz - 4)
+        rows_html = []
 
-        # Committed final lines (solid white with shadow)
-        for line in self._final_lines:
-            lines_html.append(
-                f"<div style='color: #FFFFFF; font-size: {sz}px; font-weight: 600; line-height: 1.35; "
-                f"text-shadow: 0px 1px 3px rgba(0,0,0,0.8);'>{line}</div>"
+        # Committed final rows
+        for cap in self._final_captions:
+            en_text = cap.text
+            ja_text = cap.original_text.strip() if cap.original_text else ""
+
+            if self.dual_subtitles and ja_text:
+                # Side-by-side 2-column view
+                rows_html.append(
+                    f"<tr>"
+                    f"<td style='width: 48%; vertical-align: top; padding: 3px 10px 3px 0px; "
+                    f"color: #CFD8DC; font-size: {sz}px; font-weight: 500; font-family: Meiryo, sans-serif; "
+                    f"text-shadow: 0px 1px 3px rgba(0,0,0,0.9); line-height: 1.35;'>"
+                    f"<span style='color: #80DEEA; font-size: {badge_sz}px; font-weight: 700; background: rgba(0,188,212,0.15); padding: 1px 5px; border-radius: 4px; margin-right: 6px;'>JA</span>{ja_text}"
+                    f"</td>"
+                    f"<td style='width: 4%; vertical-align: middle; text-align: center; color: rgba(255,255,255,0.3); font-size: 14px;'>➔</td>"
+                    f"<td style='width: 48%; vertical-align: top; padding: 3px 0px 3px 10px; "
+                    f"color: #FFFFFF; font-size: {sz}px; font-weight: 600; font-family: \"Segoe UI\", Arial, sans-serif; "
+                    f"text-shadow: 0px 1px 3px rgba(0,0,0,0.9); line-height: 1.35;'>"
+                    f"<span style='color: #A5D6A7; font-size: {badge_sz}px; font-weight: 700; background: rgba(76,175,80,0.18); padding: 1px 5px; border-radius: 4px; margin-right: 6px;'>EN</span>{en_text}"
+                    f"</td>"
+                    f"</tr>"
+                )
+            else:
+                rows_html.append(
+                    f"<tr>"
+                    f"<td colspan='3' style='padding: 3px 0px; color: #FFFFFF; font-size: {sz}px; font-weight: 600; "
+                    f"text-shadow: 0px 1px 3px rgba(0,0,0,0.9); line-height: 1.35;'>{en_text}</td>"
+                    f"</tr>"
+                )
+
+        # Interim active line (updating live)
+        if self._current_interim_caption is not None:
+            interim_cap = self._current_interim_caption
+            en_text = interim_cap.text
+            ja_text = interim_cap.original_text.strip() if interim_cap.original_text else ""
+
+            if self.dual_subtitles and ja_text:
+                rows_html.append(
+                    f"<tr>"
+                    f"<td style='width: 48%; vertical-align: top; padding: 3px 10px 3px 0px; "
+                    f"color: #90CAF9; font-size: {sz}px; font-style: italic; font-family: Meiryo, sans-serif; "
+                    f"text-shadow: 0px 1px 3px rgba(0,0,0,0.9); line-height: 1.35;'>"
+                    f"<span style='color: #64B5F6; font-size: {badge_sz}px; font-weight: 700; font-style: normal; background: rgba(33,150,243,0.18); padding: 1px 5px; border-radius: 4px; margin-right: 6px;'>JA</span>{ja_text}"
+                    f"</td>"
+                    f"<td style='width: 4%; vertical-align: middle; text-align: center; color: #64B5F6; font-size: 14px;'>➔</td>"
+                    f"<td style='width: 48%; vertical-align: top; padding: 3px 0px 3px 10px; "
+                    f"color: #64B5F6; font-size: {sz}px; font-style: italic; font-weight: 600; font-family: \"Segoe UI\", Arial, sans-serif; "
+                    f"text-shadow: 0px 1px 3px rgba(0,0,0,0.9); line-height: 1.35;'>"
+                    f"<span style='color: #81D4FA; font-size: {badge_sz}px; font-weight: 700; font-style: normal; background: rgba(3,169,244,0.18); padding: 1px 5px; border-radius: 4px; margin-right: 6px;'>EN</span>{en_text} <span style='color: #42A5F5; font-size: {dot_sz}px;'>●</span>"
+                    f"</td>"
+                    f"</tr>"
+                )
+            else:
+                rows_html.append(
+                    f"<tr>"
+                    f"<td colspan='3' style='padding: 3px 0px; color: #90CAF9; font-size: {sz}px; font-style: italic; "
+                    f"text-shadow: 0px 1px 3px rgba(0,0,0,0.9); line-height: 1.35;'>{en_text} <span style='color: #64B5F6; font-size: {dot_sz}px;'>●</span></td>"
+                    f"</tr>"
+                )
+        elif self._current_interim_text:
+            rows_html.append(
+                f"<tr>"
+                f"<td colspan='3' style='padding: 3px 0px; color: #90CAF9; font-size: {sz}px; font-style: italic; "
+                f"text-shadow: 0px 1px 3px rgba(0,0,0,0.9); line-height: 1.35;'>{self._current_interim_text} <span style='color: #64B5F6; font-size: {dot_sz}px;'>●</span></td>"
+                f"</tr>"
             )
 
-        # Interim active line (dimmed & italicized)
-        if self._current_interim_text:
-            lines_html.append(
-                f"<div style='color: #90CAF9; font-size: {sz}px; font-style: italic; line-height: 1.35; "
-                f"text-shadow: 0px 1px 3px rgba(0,0,0,0.8);'>{self._current_interim_text} <span style='color: #64B5F6; font-size: {max(10, sz-4)}px;'>●</span></div>"
-            )
-
-        if not lines_html:
-            self.text_label.setText(f"<div style='color: rgba(255,255,255,0.4); font-size: {max(12, sz-2)}px;'>Listening...</div>")
+        if not rows_html:
+            self.text_label.setText(f"<div style='color: rgba(255,255,255,0.4); font-size: {max(12, sz-2)}px;'>Listening for Japanese audio...</div>")
         else:
-            self.text_label.setText("".join(lines_html))
+            self.text_label.setText(f"<table style='width: 100%; border-collapse: separate; border-spacing: 0px 4px;'>{''.join(rows_html)}</table>")
 
     def update_status_hint(self, status: object) -> None:
         """Update subtitle placeholder text with pipeline connection/loading status."""
@@ -247,7 +314,9 @@ class CaptionOverlayWidget(QWidget):
 
     def clear_captions(self) -> None:
         """Clear visible lines."""
+        self._final_captions.clear()
         self._final_lines.clear()
+        self._current_interim_caption = None
         self._current_interim_text = ""
         self._render_text()
 
@@ -260,6 +329,7 @@ class OverlayCaptionPresenter(CaptionPresenter):
         max_history_lines: int = 3,
         font_size: int = 16,
         opacity: float = 0.85,
+        dual_subtitles: bool = True,
         show_window: bool = True,
     ) -> None:
         if "PySide6" not in sys.modules and QObject is object:
@@ -276,6 +346,7 @@ class OverlayCaptionPresenter(CaptionPresenter):
             max_history_lines=max_history_lines,
             font_size=font_size,
             opacity=opacity,
+            dual_subtitles=dual_subtitles,
         )
         self._bridge = _CaptionBridge()
 

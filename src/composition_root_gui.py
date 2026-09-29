@@ -32,6 +32,9 @@ from src.infrastructure.stt.faster_whisper_stt import FasterWhisperTranscriber
 from src.infrastructure.translation.argos_translator import ArgosTranslateTranslator
 from src.infrastructure.ui.control_window import ControlWindow
 from src.infrastructure.ui.overlay_presenter import OverlayCaptionPresenter
+from src.infrastructure.vocabulary.json_custom_vocabulary import (
+    JsonCustomVocabularyRepository,
+)
 
 
 class _StatusBridge(QObject):
@@ -46,20 +49,24 @@ class LiveCaptionerGUIController:
     def __init__(
         self,
         settings_repository: Optional[SettingsRepository] = None,
+        vocabulary_repository: Optional[object] = None,
         default_model_size: str = "small",
         vad_threshold: float = 0.4,
         vad_silence_timeout_ms: float = 500.0,
+        debug_latency: bool = False,
     ) -> None:
         if QApplication is None:
             raise ImportError("PySide6 is required to run the GUI application.")
 
-        # 1. Initialize Settings Repository and load persisted preferences
+        # 1. Initialize Settings and Vocabulary Repositories
         self.settings_repo = settings_repository or LocalSettingsRepository()
+        self.vocabulary_repo = vocabulary_repository or JsonCustomVocabularyRepository()
         self.settings: Settings = self.settings_repo.load()
 
         self.default_model_size = default_model_size
         self.vad_threshold = vad_threshold
         self.vad_silence_timeout_ms = vad_silence_timeout_ms
+        self.debug_latency = debug_latency
         self._use_case: Optional[LiveCaptionUseCase] = None
 
         # 2. Discover available WASAPI audio loopback devices
@@ -102,13 +109,16 @@ class LiveCaptionerGUIController:
         """Update and persist settings when user modifies control panel options."""
         device_idx = changes.get("selected_audio_device")
         model_size = changes.get("whisper_model_size", self.settings.whisper_model_size)
+        dual_subtitles = changes.get("dual_subtitles", self.settings.dual_subtitles)
 
         self.settings = replace(
             self.settings,
             selected_audio_device=device_idx,
             whisper_model_size=model_size,
+            dual_subtitles=dual_subtitles,
         )
         self.settings_repo.save(self.settings)
+        self.presenter.apply_settings(self.settings)
 
     def _on_overlay_position_changed(self, x: int, y: int) -> None:
         """Update and persist settings when user drags the overlay."""
@@ -145,13 +155,15 @@ class LiveCaptionerGUIController:
             sample_rate=16000,
             threshold=self.settings.vad_sensitivity,
             silence_timeout_ms=self.settings.vad_silence_timeout_ms,
+            emit_interim=True,
         )
         transcriber = FasterWhisperTranscriber(
             model_size=model_size,
             device="auto",
-            compute_type="int8",
+            compute_type="auto",
             beam_size=1,
-            task="translate",
+            task="transcribe",
+            fallback_to_base=self.settings.fallback_to_base,
         )
         translator = ArgosTranslateTranslator(
             from_code="ja",
@@ -165,7 +177,9 @@ class LiveCaptionerGUIController:
             transcriber=transcriber,
             translator=translator,
             presenter=self.presenter,
+            vocabulary=self.vocabulary_repo,
             status_callback=self._on_status_callback,
+            debug_latency=self.debug_latency,
         )
 
         # Clear existing overlay captions and start background worker
@@ -207,6 +221,7 @@ def run_gui_application(
     default_model_size: str = "small",
     vad_threshold: float = 0.4,
     vad_silence_timeout_ms: float = 500.0,
+    debug_latency: bool = False,
 ) -> int:
     """Bootstrap and run the PySide6 live captioner application."""
     app = QApplication.instance() or QApplication(sys.argv)
@@ -217,6 +232,7 @@ def run_gui_application(
         default_model_size=default_model_size,
         vad_threshold=vad_threshold,
         vad_silence_timeout_ms=vad_silence_timeout_ms,
+        debug_latency=debug_latency,
     )
     controller.show()
 

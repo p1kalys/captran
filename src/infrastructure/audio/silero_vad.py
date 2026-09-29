@@ -36,6 +36,8 @@ class SileroVadSegmenter(SpeechSegmenter):
         silence_timeout_ms: float = 250.0,
         max_speech_duration_ms: float = 3000.0,
         pre_speech_pad_ms: float = 64.0,
+        interim_interval_ms: float = 1000.0,
+        emit_interim: bool = False,
     ) -> None:
         resolved_path = _resolve_resource_path(model_path)
         if not resolved_path.exists():
@@ -50,6 +52,8 @@ class SileroVadSegmenter(SpeechSegmenter):
         self.silence_timeout_ms = silence_timeout_ms
         self.max_speech_duration_ms = max_speech_duration_ms
         self.pre_speech_pad_ms = pre_speech_pad_ms
+        self.interim_interval_ms = interim_interval_ms
+        self.emit_interim = emit_interim
 
         # Window size for Silero VAD (512 samples for 16kHz, 256 for 8kHz)
         self.window_size_samples = 512 if sample_rate == 16000 else 256
@@ -115,6 +119,7 @@ class SileroVadSegmenter(SpeechSegmenter):
         current_utterance_pcm = bytearray()
         triggered = False
         current_speech_ms = 0.0
+        speech_ms_since_last_interim = 0.0
         current_silence_ms = 0.0
         utterance_start_time: Optional[float] = None
         frame_duration_ms = (self.window_size_samples / self.sample_rate) * 1000.0
@@ -140,7 +145,24 @@ class SileroVadSegmenter(SpeechSegmenter):
 
                     current_utterance_pcm.extend(window)
                     current_speech_ms += frame_duration_ms
+                    speech_ms_since_last_interim += frame_duration_ms
                     current_silence_ms = 0.0
+
+                    # Emit interim rolling window for live partial captions
+                    if (
+                        self.emit_interim
+                        and speech_ms_since_last_interim >= self.interim_interval_ms
+                        and current_speech_ms >= self.min_speech_duration_ms
+                    ):
+                        yield AudioChunk(
+                            pcm_data=bytes(current_utterance_pcm),
+                            sample_rate=self.sample_rate,
+                            timestamp=utterance_start_time or chunk.timestamp,
+                            channels=1,
+                            sample_width=2,
+                            is_final=False,
+                        )
+                        speech_ms_since_last_interim = 0.0
 
                     # Stream slice if continuous speech exceeds max_speech_duration_ms
                     if current_speech_ms >= self.max_speech_duration_ms:
@@ -150,9 +172,11 @@ class SileroVadSegmenter(SpeechSegmenter):
                             timestamp=utterance_start_time or chunk.timestamp,
                             channels=1,
                             sample_width=2,
+                            is_final=True,
                         )
                         current_utterance_pcm.clear()
                         current_speech_ms = 0.0
+                        speech_ms_since_last_interim = 0.0
                         utterance_start_time = chunk.timestamp
 
                 else:
@@ -168,12 +192,14 @@ class SileroVadSegmenter(SpeechSegmenter):
                                     timestamp=utterance_start_time or chunk.timestamp,
                                     channels=1,
                                     sample_width=2,
+                                    is_final=True,
                                 )
 
                             # Reset utterance state
                             triggered = False
                             current_utterance_pcm.clear()
                             current_speech_ms = 0.0
+                            speech_ms_since_last_interim = 0.0
                             current_silence_ms = 0.0
                             utterance_start_time = None
                             self.reset_state()
@@ -191,4 +217,5 @@ class SileroVadSegmenter(SpeechSegmenter):
                 timestamp=utterance_start_time or 0.0,
                 channels=1,
                 sample_width=2,
+                is_final=True,
             )

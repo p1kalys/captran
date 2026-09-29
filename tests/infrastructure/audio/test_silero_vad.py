@@ -142,3 +142,42 @@ def test_silero_vad_onnx_live_inference():
     assert isinstance(prob, float)
     assert 0.0 <= prob <= 1.0
     assert prob < 0.2  # Silence probability should be near zero
+
+
+def test_silero_vad_emits_rolling_interim_windows(monkeypatch):
+    model_path = Path("models/silero_vad.onnx")
+    if not model_path.exists():
+        pytest.skip("models/silero_vad.onnx not present")
+
+    wav_path = create_or_load_sample_wav(Path("tests/data/sample_two_utterances.wav"))
+
+    segmenter = SileroVadSegmenter(
+        model_path=str(model_path),
+        sample_rate=16000,
+        threshold=0.5,
+        min_speech_duration_ms=250.0,
+        silence_timeout_ms=500.0,
+        interim_interval_ms=500.0,
+        emit_interim=True,
+    )
+
+    frame_dur = 512 / 16000.0
+    current_time_ref = [0.0]
+
+    def mock_predict_prob(window_pcm: bytes) -> float:
+        t = current_time_ref[0]
+        current_time_ref[0] += frame_dur
+        if (0.3 <= t < 1.3) or (2.3 <= t < 3.3):
+            return 0.95
+        return 0.05
+
+    monkeypatch.setattr(segmenter, "_predict_prob", mock_predict_prob)
+
+    chunk_stream = wav_to_chunk_stream(wav_path, chunk_duration_s=0.032)
+    chunks = list(segmenter.segment(chunk_stream))
+
+    interim_chunks = [c for c in chunks if not c.is_final]
+    final_chunks = [c for c in chunks if c.is_final]
+
+    assert len(interim_chunks) >= 2
+    assert len(final_chunks) == 2

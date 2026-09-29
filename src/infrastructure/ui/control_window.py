@@ -16,6 +16,7 @@ try:
     from PySide6.QtGui import QColor, QFont, QIcon
     from PySide6.QtWidgets import (
         QApplication,
+        QCheckBox,
         QComboBox,
         QFormLayout,
         QFrame,
@@ -145,6 +146,12 @@ class ControlWindow(QWidget):
         self.model_combo.currentIndexChanged.connect(self._on_setting_modified)
         form_layout.addRow("Whisper Model:", self.model_combo)
 
+        # Dual Subtitle Mode Checkbox
+        self.dual_subtitles_check = QCheckBox("Enable Dual Subtitles (Stacked JA + EN)")
+        self.dual_subtitles_check.setChecked(True)
+        self.dual_subtitles_check.stateChanged.connect(self._on_setting_modified)
+        form_layout.addRow("Display Mode:", self.dual_subtitles_check)
+
         layout.addWidget(settings_group)
 
         # Status Label
@@ -198,11 +205,14 @@ class ControlWindow(QWidget):
         if idx >= 0:
             self.model_combo.setCurrentIndex(idx)
 
+        self.dual_subtitles_check.setChecked(getattr(settings, "dual_subtitles", True))
+
     def _on_setting_modified(self) -> None:
         """Emit notification when dropdown options are changed."""
         self.settings_changed.emit({
             "selected_audio_device": self.device_combo.currentData(),
             "whisper_model_size": self.model_combo.currentText(),
+            "dual_subtitles": self.dual_subtitles_check.isChecked(),
         })
 
     def update_devices(self, devices: List[Dict]) -> None:

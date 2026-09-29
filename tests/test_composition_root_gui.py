@@ -31,10 +31,12 @@ def test_control_window_interaction() -> None:
     custom_settings = Settings(
         selected_audio_device=1,
         whisper_model_size="tiny",
+        dual_subtitles=True,
     )
     window.apply_settings(custom_settings)
     assert window.model_combo.currentText() == "tiny"
     assert window.device_combo.currentData() == 1
+    assert window.dual_subtitles_check.isChecked() is True
 
     # Test start emission
     started_configs = []
@@ -65,7 +67,7 @@ def test_gui_controller_settings_wiring() -> None:
     with tempfile.TemporaryDirectory() as tmp_dir:
         cfg_file = Path(tmp_dir) / "config.json"
         repo = LocalSettingsRepository(config_file_path=cfg_file)
-        repo.save(Settings(whisper_model_size="tiny", overlay_opacity=0.9))
+        repo.save(Settings(whisper_model_size="tiny", overlay_opacity=0.9, dual_subtitles=True))
 
         from src.composition_root_gui import LiveCaptionerGUIController
 
@@ -73,6 +75,7 @@ def test_gui_controller_settings_wiring() -> None:
         assert controller.settings.whisper_model_size == "tiny"
         assert controller.control_window.model_combo.currentText() == "tiny"
         assert controller.presenter.widget.opacity == 0.9
+        assert controller.presenter.widget.dual_subtitles is True
 
         # Clean up
         controller.close()

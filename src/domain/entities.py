@@ -6,7 +6,7 @@ All entities and value objects are immutable dataclasses.
 
 from dataclasses import dataclass, field
 import time
-from typing import Optional
+from typing import Dict, Optional, Sequence, Tuple
 
 
 @dataclass(frozen=True)
@@ -18,6 +18,7 @@ class AudioChunk:
     timestamp: float = field(default_factory=time.time)
     channels: int = 1
     sample_width: int = 2
+    is_final: bool = True
 
     def __init__(
         self,
@@ -27,6 +28,7 @@ class AudioChunk:
         channels: int = 1,
         sample_width: int = 2,
         data: Optional[bytes] = None,
+        is_final: bool = True,
     ) -> None:
         raw = pcm_data if pcm_data is not None else (data if data is not None else b"")
         object.__setattr__(self, "pcm_data", raw)
@@ -34,6 +36,7 @@ class AudioChunk:
         object.__setattr__(self, "timestamp", timestamp if timestamp is not None else time.time())
         object.__setattr__(self, "channels", channels)
         object.__setattr__(self, "sample_width", sample_width)
+        object.__setattr__(self, "is_final", is_final)
 
     # Backward compatibility alias
     @property
@@ -148,6 +151,64 @@ class Settings:
     vad_sensitivity: float = 0.4
     vad_silence_timeout_ms: float = 500.0
     max_history_lines: int = 3
+    fallback_to_base: bool = False
+    dual_subtitles: bool = True
+
+
+@dataclass(frozen=True)
+class CustomVocabulary:
+    """Domain-specific terms, acronyms, and substitution mappings."""
+
+    prompt_terms: Tuple[str, ...] = field(default_factory=tuple)
+    source_substitutions: Dict[str, str] = field(default_factory=dict)
+    target_substitutions: Dict[str, str] = field(default_factory=dict)
+
+    def __init__(
+        self,
+        prompt_terms: Optional[Sequence[str]] = None,
+        source_substitutions: Optional[Dict[str, str]] = None,
+        target_substitutions: Optional[Dict[str, str]] = None,
+    ) -> None:
+        object.__setattr__(self, "prompt_terms", tuple(prompt_terms) if prompt_terms else ())
+        object.__setattr__(
+            self,
+            "source_substitutions",
+            dict(source_substitutions) if source_substitutions else {},
+        )
+        object.__setattr__(
+            self,
+            "target_substitutions",
+            dict(target_substitutions) if target_substitutions else {},
+        )
+
+    def get_initial_prompt(self) -> str:
+        """Construct comma-separated prompt hint string for Whisper STT."""
+        return ", ".join(self.prompt_terms)
+
+    def apply_source_substitutions(self, text: str) -> str:
+        """Pre-translation substitution pass on Japanese / source transcript."""
+        if not text or not self.source_substitutions:
+            return text
+        res = text
+        for pattern, repl in self.source_substitutions.items():
+            if pattern in res:
+                res = res.replace(pattern, repl)
+        return res
+
+    def apply_target_substitutions(self, text: str) -> str:
+        """Post-translation substitution pass on English translated text."""
+        if not text or not self.target_substitutions:
+            return text
+        res = text
+        for pattern, repl in self.target_substitutions.items():
+            # Exact case-insensitive replacement if ASCII/Latin words
+            if pattern.lower() in res.lower():
+                import re
+                try:
+                    res = re.sub(re.escape(pattern), repl, res, flags=re.IGNORECASE)
+                except Exception:
+                    res = res.replace(pattern, repl)
+        return res
 
 
 @dataclass(frozen=True)

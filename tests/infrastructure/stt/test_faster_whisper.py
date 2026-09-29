@@ -42,6 +42,27 @@ def test_faster_whisper_transcriber_initialization() -> None:
     assert transcriber.beam_size == 1
 
 
+def test_faster_whisper_auto_device_detection() -> None:
+    with patch("src.infrastructure.stt.faster_whisper_stt.is_cuda_available", return_value=True):
+        transcriber = FasterWhisperTranscriber(device="auto", compute_type="auto")
+        assert transcriber.device == "cuda"
+        assert transcriber.compute_type == "float16"
+
+    with patch("src.infrastructure.stt.faster_whisper_stt.is_cuda_available", return_value=False):
+        transcriber = FasterWhisperTranscriber(device="auto", compute_type="auto")
+        assert transcriber.device == "cpu"
+        assert transcriber.compute_type == "int8"
+
+
+def test_faster_whisper_fallback_to_base_option() -> None:
+    transcriber = FasterWhisperTranscriber(
+        model_size="small",
+        fallback_to_base=True,
+    )
+    assert transcriber.model_size == "base"
+    assert transcriber.fallback_to_base is True
+
+
 def test_faster_whisper_transcription_with_mock() -> None:
     transcriber = FasterWhisperTranscriber(model_size="tiny", task="transcribe")
 

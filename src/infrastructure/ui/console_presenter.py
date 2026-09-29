@@ -41,17 +41,23 @@ class ConsoleCaptionPresenter(CaptionPresenter):
         if self.show_timestamps:
             timestamp_str = f"[{time.strftime('%H:%M:%S')}] "
 
+        ja_text = caption.original_text.strip() if getattr(caption, "original_text", "") else ""
+        if ja_text:
+            display_text = f"[JA] {ja_text}  ➔  [EN] {text}"
+        else:
+            display_text = f"{self.prefix}{text}"
+
         if caption.is_final:
             # Clear any remaining characters from previous interim overwrite
-            clear_padding = " " * max(0, self._last_line_len - len(text) - len(timestamp_str) - len(self.prefix))
-            output_line = f"\r{timestamp_str}{self.prefix}{text}{clear_padding}\n"
+            clear_padding = " " * max(0, self._last_line_len - len(display_text) - len(timestamp_str))
+            output_line = f"\r{timestamp_str}{display_text}{clear_padding}\n"
             sys.stdout.write(output_line)
             sys.stdout.flush()
             self._last_line_len = 0
         else:
             # Interim/partial update (overwrites active line)
             interim_tag = " [~] "
-            interim_line = f"\r{timestamp_str}{self.prefix}{text}{interim_tag}"
+            interim_line = f"\r{timestamp_str}{display_text}{interim_tag}"
             # Pad with spaces to wipe previous longer interim lines
             pad_len = max(0, self._last_line_len - len(interim_line))
             formatted_line = interim_line + (" " * pad_len)

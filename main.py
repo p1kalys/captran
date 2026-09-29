@@ -77,14 +77,24 @@ def main() -> None:
     parser.add_argument(
         "--task",
         type=str,
-        default="translate",
-        choices=["translate", "transcribe"],
-        help="Whisper engine task: 'translate' for high-accuracy direct JA->EN speech translation, or 'transcribe' for Japanese STT + Argos Translate (default: translate)",
+        default="transcribe",
+        choices=["transcribe", "translate"],
+        help="Whisper engine task: 'transcribe' for Japanese speech transcription + English translation (supports side-by-side dual subtitles), or 'translate' for direct English translation (default: transcribe)",
     )
     parser.add_argument(
         "--no-timestamps",
         action="store_true",
         help="Hide timestamps in CLI output",
+    )
+    parser.add_argument(
+        "--debug-latency",
+        action="store_true",
+        help="Enable diagnostic latency timing instrumentation and print running p50/p95 stage summaries every 30s",
+    )
+    parser.add_argument(
+        "--fallback-to-base",
+        action="store_true",
+        help="Fall back to the 'base' Whisper model for lower-end hardware",
     )
 
     args = parser.parse_args()
@@ -114,6 +124,8 @@ def main() -> None:
                 vad_threshold=args.vad_threshold,
                 vad_silence_timeout_ms=args.silence_timeout,
                 show_timestamps=not args.no_timestamps,
+                debug_latency=args.debug_latency,
+                fallback_to_base=args.fallback_to_base,
             )
             run_cli_captioner(app)
         except Exception as e:
@@ -133,6 +145,7 @@ def main() -> None:
                 default_model_size=args.model_size,
                 vad_threshold=args.vad_threshold,
                 vad_silence_timeout_ms=args.silence_timeout,
+                debug_latency=args.debug_latency,
             )
         )
     except ImportError as e:
@@ -148,6 +161,8 @@ def main() -> None:
             vad_threshold=args.vad_threshold,
             vad_silence_timeout_ms=args.silence_timeout,
             show_timestamps=not args.no_timestamps,
+            debug_latency=args.debug_latency,
+            fallback_to_base=args.fallback_to_base,
         )
         run_cli_captioner(app)
 

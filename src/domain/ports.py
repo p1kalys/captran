@@ -80,6 +80,20 @@ class CaptionPresenter(ABC):
         """Receive a CaptionSegment and render or display it on screen."""
         raise NotImplementedError
 
+    def show_interim(self, caption: CaptionSegment) -> None:
+        """Present an interim/partial live subtitle update."""
+        if isinstance(caption, CaptionSegment):
+            self.present(caption)
+        else:
+            self.present(CaptionSegment(text=str(caption), is_final=False))
+
+    def show_final(self, caption: CaptionSegment) -> None:
+        """Present a committed final subtitle update."""
+        if isinstance(caption, CaptionSegment):
+            self.present(caption)
+        else:
+            self.present(CaptionSegment(text=str(caption), is_final=True))
+
     def display_cue(self, cue: CaptionSegment) -> None:
         self.present(cue)
 
@@ -104,8 +118,23 @@ class SettingsRepository(ABC):
         raise NotImplementedError
 
 
+class CustomVocabularyRepository(ABC):
+    """Abstract port for loading and saving custom domain vocabulary."""
+
+    @abstractmethod
+    def load(self) -> "CustomVocabulary":
+        """Load custom vocabulary terms and substitution rules."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def save(self, vocabulary: "CustomVocabulary") -> None:
+        """Persist custom vocabulary terms and substitution rules."""
+        raise NotImplementedError
+
+
 # Backward compatibility aliases
 AudioCapturePort = AudioSource
 SpeechToTextPort = Transcriber
 TranslationPort = Translator
 CaptionDisplayPort = CaptionPresenter
+CustomVocabularyPort = CustomVocabularyRepository

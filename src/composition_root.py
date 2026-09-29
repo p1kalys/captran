@@ -30,6 +30,7 @@ def build_live_captioner(
     translation_model_path: str = "opus-mt-ja-en",
     sample_rate: int = 16000,
     verbose_ui: bool = False,
+    debug_latency: bool = False,
 ) -> ApplicationContainer:
     """Wire concrete infrastructure adapters into the LiveCaptioningUseCase.
 
@@ -47,6 +48,7 @@ def build_live_captioner(
         speech_to_text=stt_adapter,
         translation=translation_adapter,
         caption_display=ui_adapter,
+        debug_latency=debug_latency,
     )
 
     return ApplicationContainer(
