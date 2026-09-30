@@ -44,12 +44,12 @@ It captures live system audio (meetings, browser tabs, video streams, YouTube, o
 
 ```mermaid
 flowchart TD
-    A["System Audio / Headset (WASAPI Loopback)"] -->|Audio Queue| B["Silero VAD ONNX (Speech Segmenter)"]
-    B -->|STT Queue (Interim Coalescing)| C["Faster-Whisper (Multilingual INT8/FP16)"]
-    C -->|Interim Streaming| E["Caption Presenter (Side-by-Side)"]
-    C -->|Translation Queue| D["Argos Translate (Direct & English-Pivot MT)"]
+    A["System Audio / Headset - WASAPI Loopback"] -->|Audio Queue| B["Silero VAD ONNX - Speech Segmenter"]
+    B -->|STT Queue - Interim Coalescing| C["Faster-Whisper - Multilingual INT8/FP16"]
+    C -->|Interim Streaming| E["Caption Presenter - Side-by-Side"]
+    C -->|Translation Queue| D["Argos Translate - Direct & English-Pivot MT"]
     D -->|Final Subtitles| E
-    E --> F1["PySide6 Floating Overlay (Source to Target)"]
+    E --> F1["PySide6 Floating Overlay - Source to Target"]
     E --> F2["Terminal CLI Presenter"]
 ```
 

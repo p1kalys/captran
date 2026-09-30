@@ -44,27 +44,27 @@ To guarantee that slow neural network inference steps never block real-time audi
 ```mermaid
 flowchart TD
     subgraph Capture["Worker 1: Audio Capture"]
-        A[WASAPI Loopback Stream] --> Q1[Bounded Audio Queue]
+        A["WASAPI Loopback Stream"] --> Q1["Bounded Audio Queue"]
     end
 
     subgraph VAD["Worker 2: Speech Segmentation"]
-        Q1 --> B[Silero VAD ONNX]
-        B -->|Utterance Snapshots| Q2[Bounded STT Queue]
+        Q1 --> B["Silero VAD ONNX"]
+        B -->|Utterance Snapshots| Q2["Bounded STT Queue"]
     end
 
     subgraph STT["Worker 3: Speech-to-Text"]
-        Q2 -->|Coalesce Interim Snapshots| C[Faster-Whisper Multilingual INT8/FP16]
-        C -->|Interim Captions| P[Caption Presenter]
-        C -->|Final Utterances| Q3[Bounded Translation Queue]
+        Q2 -->|Coalesce Interim Snapshots| C["Faster-Whisper Multilingual INT8/FP16"]
+        C -->|Interim Captions| P["Caption Presenter"]
+        C -->|Final Utterances| Q3["Bounded Translation Queue"]
     end
 
     subgraph MT["Worker 4: Machine Translation"]
-        Q3 --> D[Argos Translate Direct & English-Pivot MT]
+        Q3 --> D["Argos Translate Direct & English-Pivot MT"]
         D -->|Final Subtitles| P
     end
 
     subgraph UI["Presentation Layer"]
-        P --> E1["PySide6 Side-by-Side Overlay (Source to Target)"]
+        P --> E1["PySide6 Side-by-Side Overlay - Source to Target"]
         P --> E2["Terminal CLI Presenter"]
     end
 ```
