@@ -4,7 +4,7 @@
 [![Python: 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![Architecture: Hexagonal](https://img.shields.io/badge/Architecture-Hexagonal%20%2F%20Ports%20%26%20Adapters-green.svg)](ARCHITECTURE.md)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows%20WASAPI-lightgrey.svg)](https://docs.microsoft.com/en-us/windows/win32/coreaudio/wasapi)
-[![Tests: 97 Passing](https://img.shields.io/badge/Tests-97%20Passing-brightgreen.svg)](#-running-tests--benchmarks)
+[![Tests: 97 Passing](https://img.shields.io/badge/Tests-97%20Passing-brightgreen.svg)](#running-tests--benchmarks)
 
 **CapTran** is a high-performance, **100% offline, privacy-first multilingual live meeting captioner and audio translator** built with clean Hexagonal Architecture (Ports and Adapters).
 
@@ -17,8 +17,8 @@ It captures live system audio (meetings, browser tabs, video streams, YouTube, o
 - **100% Offline & Private:** Zero cloud API calls or runtime network traffic. All neural network inferences (VAD, STT, and Machine Translation) run entirely on-device.
 - **Multilingual Live Captioning & Translation (7 Languages, 42 Pairs):**
   - Full bidirectional support across **Hindi (`hi`)**, **Japanese (`ja`)**, **English (`en`)**, **Spanish (`es`)**, **French (`fr`)**, **German (`de`)**, and **Korean (`ko`)**.
-  - **Intelligent Pivot Translation:** Automatically uses direct translation packages when available, or seamless 2-hop pivot routing via English (e.g. `ja ➔ en ➔ de`, `hi ➔ en ➔ es`) to support all 42 language pair combinations.
-- **Side-by-Side Dual Subtitles (`[SRC] ➔ [TGT]`):**
+  - **Intelligent Pivot Translation:** Automatically uses direct translation packages when available, or seamless 2-hop pivot routing via English (e.g. `ja -> en -> de`, `hi -> en -> es`) to support all 42 language pair combinations.
+- **Side-by-Side Dual Subtitles (`[SRC] -> [TGT]`):**
   - Displays original speech (`[JA]`, `[HI]`, etc.) and translated output (`[EN]`, `[DE]`, etc.) side-by-side in real time.
   - Live rolling interim streaming with visual pulsing indicator (`●`) that stabilizes into finalized subtitles.
 - **Decoupled Multi-Threaded Pipeline with Backpressure:**
@@ -49,7 +49,7 @@ flowchart TD
     C -->|Interim Streaming| E["Caption Presenter (Side-by-Side)"]
     C -->|Translation Queue| D["Argos Translate (Direct & English-Pivot MT)"]
     D -->|Final Subtitles| E
-    E --> F1["PySide6 Floating Overlay ([SRC] ➔ [TGT])"]
+    E --> F1["PySide6 Floating Overlay (Source to Target)"]
     E --> F2["Terminal CLI Presenter"]
 ```
 
@@ -66,7 +66,7 @@ flowchart TD
 
 ```powershell
 # Clone repository
-git clone https://github.com/your-username/captran.git
+git clone https://github.com/p1kalys/captran.git
 cd captran
 
 # Create virtual environment

@@ -64,7 +64,7 @@ flowchart TD
     end
 
     subgraph UI["Presentation Layer"]
-        P --> E1["PySide6 Side-by-Side Overlay [SRC] ➔ [TGT]"]
+        P --> E1["PySide6 Side-by-Side Overlay (Source to Target)"]
         P --> E2["Terminal CLI Presenter"]
     end
 ```
