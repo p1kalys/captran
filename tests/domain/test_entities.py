@@ -6,8 +6,28 @@ import pytest
 from src.domain.entities import (
     AudioChunk,
     CaptionSegment,
+    Language,
     TranscriptSegment,
 )
+
+
+def test_language_enum_codes() -> None:
+    # Supported exactly: hi, ja, en, es, fr, de, ko
+    assert {lang.value for lang in Language} == {"hi", "ja", "en", "es", "fr", "de", "ko"}
+    assert Language.HINDI == "hi"
+    assert Language.JAPANESE == "ja"
+    assert Language.ENGLISH == "en"
+    assert Language.SPANISH == "es"
+    assert Language.FRENCH == "fr"
+    assert Language.GERMAN == "de"
+    assert Language.KOREAN == "ko"
+
+    assert Language.from_code("hi") == Language.HINDI
+    assert Language.from_code("JA") == Language.JAPANESE
+    assert Language.from_code(Language.ENGLISH) == Language.ENGLISH
+
+    with pytest.raises(ValueError):
+        Language.from_code("zh")
 
 
 def test_audio_chunk_immutability_and_duration() -> None:
@@ -33,9 +53,11 @@ def test_transcript_segment_immutability() -> None:
         is_final=True,
         start_time=0.0,
         end_time=1.2,
+        language=Language.JAPANESE,
     )
     assert segment.text == "こんにちは"
     assert segment.is_final is True
+    assert segment.language == Language.JAPANESE
     assert segment.language == "ja"
 
     with pytest.raises(FrozenInstanceError):
@@ -48,9 +70,11 @@ def test_caption_segment_immutability() -> None:
         is_final=True,
         start_time=0.0,
         end_time=1.2,
+        language=Language.ENGLISH,
     )
     assert caption.text == "Hello"
     assert caption.is_final is True
+    assert caption.language == Language.ENGLISH
     assert caption.language == "en"
 
     with pytest.raises(FrozenInstanceError):

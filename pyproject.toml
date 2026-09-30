@@ -31,3 +31,6 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "integration: mark test as integration test requiring model runtimes",
+]

@@ -92,6 +92,20 @@ def main() -> None:
         help="Enable diagnostic latency timing instrumentation and print running p50/p95 stage summaries every 30s",
     )
     parser.add_argument(
+        "--source-language",
+        type=str,
+        default="ja",
+        choices=["hi", "ja", "en", "es", "fr", "de", "ko"],
+        help="Source spoken language (default: ja, options: hi, ja, en, es, fr, de, ko)",
+    )
+    parser.add_argument(
+        "--target-language",
+        type=str,
+        default="en",
+        choices=["hi", "ja", "en", "es", "fr", "de", "ko"],
+        help="Target caption language (default: en, options: hi, ja, en, es, fr, de, ko)",
+    )
+    parser.add_argument(
         "--fallback-to-base",
         action="store_true",
         help="Fall back to the 'base' Whisper model for lower-end hardware",
@@ -121,6 +135,9 @@ def main() -> None:
                 whisper_compute_type=args.compute_type,
                 whisper_task=args.task,
                 whisper_beam_size=args.beam_size,
+                source_language=args.source_language,
+                target_language=args.target_language,
+                caption_prefix=f"[{args.target_language.upper()}] ",
                 vad_threshold=args.vad_threshold,
                 vad_silence_timeout_ms=args.silence_timeout,
                 show_timestamps=not args.no_timestamps,
@@ -131,7 +148,7 @@ def main() -> None:
         except Exception as e:
             print(f"\n[ERROR] Failed to start live captioner: {e}", file=sys.stderr)
             print("\nPlease ensure model prerequisites are met:", file=sys.stderr)
-            print("  1. python scripts/install_translation_model.py", file=sys.stderr)
+            print("  1. python scripts/setup_models.py", file=sys.stderr)
             print("  2. pip install -e .", file=sys.stderr)
             sys.exit(1)
         return

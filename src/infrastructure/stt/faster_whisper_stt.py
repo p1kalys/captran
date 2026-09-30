@@ -14,7 +14,7 @@ import sys
 from typing import Optional, Sequence, Tuple
 import numpy as np
 
-from src.domain.entities import AudioChunk, TranscriptSegment
+from src.domain.entities import AudioChunk, Language, TranscriptSegment
 from src.domain.ports import Transcriber
 
 try:
@@ -71,23 +71,19 @@ def resolve_model_name_or_path(
     download_root: str = "models/whisper",
     fallback_to_base: bool = False,
 ) -> str:
-    """Resolve model: distil-whisper (ja-tuned if local), small, or fallback to base."""
+    """Resolve model: defaults to 'small' for low latency, supporting 'medium'/'large' for higher accuracy."""
     if fallback_to_base:
         return "base"
 
-    root_path = Path(download_root)
-    # If user requests distil-whisper or auto, check for local Japanese-tuned distil models
-    if model_size in ("distil-whisper", "distil", "auto", "default"):
-        if root_path.exists():
-            # Check for specific Japanese tuned distil models first
-            for candidate in root_path.iterdir():
-                if candidate.is_dir() and "distil" in candidate.name.lower() and "ja" in candidate.name.lower():
-                    return str(candidate)
-            # Check for general distil models next
-            for candidate in root_path.iterdir():
-                if candidate.is_dir() and "distil" in candidate.name.lower():
-                    return str(candidate)
+    if model_size in (None, "auto", "default", ""):
         return "small"
+
+    root_path = Path(download_root)
+    # If a specific local directory matches the requested name, use it
+    if root_path.exists():
+        candidate_dir = root_path / model_size
+        if candidate_dir.exists() and candidate_dir.is_dir():
+            return str(candidate_dir)
 
     return model_size
 
@@ -179,10 +175,18 @@ class FasterWhisperTranscriber(Transcriber):
 
         return self._model
 
-    def transcribe(self, audio: AudioChunk) -> Sequence[TranscriptSegment]:
-        """Transcribe or directly translate an audio segment into TranscriptSegments."""
+    def transcribe(
+        self,
+        audio: AudioChunk,
+        source_language: Language = Language.JAPANESE,
+    ) -> Sequence[TranscriptSegment]:
+        """Transcribe an audio segment into TranscriptSegments carrying source_language."""
         if not audio.pcm_data:
             return []
+
+        src_lang = Language.from_code(source_language) if isinstance(source_language, str) else source_language
+        if not isinstance(src_lang, Language):
+            raise ValueError(f"source_language must be a valid Language enum, got {source_language}")
 
         audio_int16 = np.frombuffer(audio.pcm_data, dtype=np.int16)
         if len(audio_int16) == 0:
@@ -193,7 +197,7 @@ class FasterWhisperTranscriber(Transcriber):
 
         segments_gen, info = model.transcribe(
             audio_float32,
-            language="ja",
+            language=src_lang.value,
             task=self.task,
             beam_size=self.beam_size,
             best_of=1,
@@ -207,7 +211,6 @@ class FasterWhisperTranscriber(Transcriber):
         segments = list(segments_gen)
         transcript_segments = []
 
-        out_lang = "en" if self.task == "translate" else "ja"
         for seg in segments:
             text = seg.text.strip()
             if text:
@@ -217,7 +220,7 @@ class FasterWhisperTranscriber(Transcriber):
                         is_final=True,
                         start_time=float(getattr(seg, "start", 0.0) or 0.0),
                         end_time=float(getattr(seg, "end", 0.0) or 0.0),
-                        language=out_lang,
+                        language=src_lang,
                     )
                 )
 

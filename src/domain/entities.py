@@ -5,9 +5,38 @@ All entities and value objects are immutable dataclasses.
 """
 
 from dataclasses import dataclass, field
+from enum import Enum
 import re
 import time
-from typing import Dict, Optional, Sequence, Tuple
+from typing import Dict, Optional, Sequence, Tuple, Union
+
+
+class Language(str, Enum):
+    """Supported language codes in CapTran."""
+
+    HINDI = "hi"
+    JAPANESE = "ja"
+    ENGLISH = "en"
+    SPANISH = "es"
+    FRENCH = "fr"
+    GERMAN = "de"
+    KOREAN = "ko"
+
+    @property
+    def code(self) -> str:
+        """Get the ISO 639-1 language code string."""
+        return self.value
+
+    @classmethod
+    def from_code(cls, code: str) -> "Language":
+        """Parse string code into Language enum."""
+        if isinstance(code, cls):
+            return code
+        code_str = str(code).strip().lower()
+        for item in cls:
+            if item.value == code_str or item.name.lower() == code_str:
+                return item
+        raise ValueError(f"Unsupported language code: '{code}'. Supported codes: {[l.value for l in cls]}")
 
 
 @dataclass(frozen=True)
@@ -55,13 +84,13 @@ class AudioChunk:
 
 @dataclass(frozen=True)
 class TranscriptSegment:
-    """Japanese transcript segment produced by speech-to-text transcription."""
+    """Transcript segment produced by speech-to-text transcription."""
 
     text: str = ""
     is_final: bool = True
     start_time: float = 0.0
     end_time: float = 0.0
-    language: str = "ja"
+    language: Language = Language.JAPANESE
     confidence: float = 1.0
 
     def __init__(
@@ -70,16 +99,17 @@ class TranscriptSegment:
         is_final: bool = True,
         start_time: float = 0.0,
         end_time: float = 0.0,
-        language: str = "ja",
+        language: Union[Language, str] = Language.JAPANESE,
         confidence: float = 1.0,
         source_text: Optional[str] = None,
     ) -> None:
         txt = source_text if source_text is not None else text
+        lang = Language.from_code(language) if isinstance(language, str) else language
         object.__setattr__(self, "text", txt)
         object.__setattr__(self, "is_final", is_final)
         object.__setattr__(self, "start_time", start_time)
         object.__setattr__(self, "end_time", end_time)
-        object.__setattr__(self, "language", language)
+        object.__setattr__(self, "language", lang)
         object.__setattr__(self, "confidence", confidence)
 
     @property
@@ -89,14 +119,15 @@ class TranscriptSegment:
 
 @dataclass(frozen=True)
 class CaptionSegment:
-    """English caption segment ready for presentation/display."""
+    """Caption segment ready for presentation/display."""
 
     text: str = ""
     is_final: bool = True
     start_time: float = 0.0
     end_time: float = 0.0
-    language: str = "en"
+    language: Language = Language.ENGLISH
     original_text: str = ""
+    source_language: Language = Language.JAPANESE
 
     def __init__(
         self,
@@ -104,22 +135,29 @@ class CaptionSegment:
         is_final: bool = True,
         start_time: float = 0.0,
         end_time: float = 0.0,
-        language: str = "en",
+        language: Union[Language, str] = Language.ENGLISH,
         original_text: str = "",
         source_text: Optional[str] = None,
         translated_text: Optional[str] = None,
-        source_language: Optional[str] = None,
-        target_language: Optional[str] = None,
+        source_language: Optional[Union[Language, str]] = None,
+        target_language: Optional[Union[Language, str]] = None,
     ) -> None:
         final_text = translated_text if translated_text is not None else text
         final_orig = source_text if source_text is not None else original_text
-        lang = target_language if target_language is not None else language
+        lang_val = target_language if target_language is not None else language
+        lang = Language.from_code(lang_val) if isinstance(lang_val, str) else lang_val
+        src_lang = (
+            Language.from_code(source_language)
+            if isinstance(source_language, str)
+            else (source_language if source_language is not None else Language.JAPANESE)
+        )
         object.__setattr__(self, "text", final_text)
         object.__setattr__(self, "is_final", is_final)
         object.__setattr__(self, "start_time", start_time)
         object.__setattr__(self, "end_time", end_time)
         object.__setattr__(self, "language", lang)
         object.__setattr__(self, "original_text", final_orig)
+        object.__setattr__(self, "source_language", src_lang)
 
     # Backward compatibility aliases
     @property
@@ -131,11 +169,7 @@ class CaptionSegment:
         return self.original_text
 
     @property
-    def source_language(self) -> str:
-        return "ja"
-
-    @property
-    def target_language(self) -> str:
+    def target_language(self) -> Language:
         return self.language
 
 
@@ -154,6 +188,8 @@ class Settings:
     max_history_lines: int = 3
     fallback_to_base: bool = False
     dual_subtitles: bool = True
+    source_language_mode: str = "ja"
+    target_language: str = "en"
 
 
 @dataclass(frozen=True)

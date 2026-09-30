@@ -6,42 +6,28 @@ import struct
 import wave
 
 
-def generate_synthetic_wav(output_path: str = "tests/data/sample_two_utterances.wav") -> str:
+def generate_synthetic_wav(
+    output_path: str = "tests/data/sample_two_utterances.wav",
+    duration_s: float = 2.0,
+    pitch_f0: float = 200.0,
+) -> str:
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
     sample_rate = 16000
-    # Structure:
-    # 0.0 - 0.3s : Silence
-    # 0.3 - 1.3s : Utterance 1 (Voice-like harmonic signal)
-    # 1.3 - 2.3s : Silence (1.0s gap > silence_timeout)
-    # 2.3 - 3.3s : Utterance 2 (Voice-like harmonic signal)
-    # 3.3 - 4.0s : Silence
-
-    total_duration = 4.0
-    total_samples = int(total_duration * sample_rate)
+    total_samples = int(duration_s * sample_rate)
     samples = []
 
     for i in range(total_samples):
         t = i / sample_rate
         val = 0.0
 
-        # Utterance 1: 0.3s to 1.3s
-        if 0.3 <= t < 1.3:
-            # Multi-harmonic voice simulator
-            f0 = 200.0  # Fundamental pitch
+        # Voice-like harmonic signal
+        if 0.2 <= t < (duration_s - 0.2):
             val = (
-                0.5 * math.sin(2 * math.pi * f0 * t)
-                + 0.3 * math.sin(2 * math.pi * f0 * 3 * t)
-                + 0.2 * math.sin(2 * math.pi * f0 * 5 * t)
-            )
-        # Utterance 2: 2.3s to 3.3s
-        elif 2.3 <= t < 3.3:
-            f0 = 250.0
-            val = (
-                0.5 * math.sin(2 * math.pi * f0 * t)
-                + 0.3 * math.sin(2 * math.pi * f0 * 3 * t)
-                + 0.2 * math.sin(2 * math.pi * f0 * 5 * t)
+                0.5 * math.sin(2 * math.pi * pitch_f0 * t)
+                + 0.3 * math.sin(2 * math.pi * pitch_f0 * 2 * t)
+                + 0.2 * math.sin(2 * math.pi * pitch_f0 * 3 * t)
             )
 
         # Scale to 16-bit signed integer
@@ -59,6 +45,32 @@ def generate_synthetic_wav(output_path: str = "tests/data/sample_two_utterances.
     return str(path)
 
 
+def generate_all_language_samples() -> dict:
+    """Generate bundled sample WAV files for all 7 supported languages."""
+    languages_config = {
+        "hindi": ("tests/data/sample_hindi.wav", 180.0),
+        "japanese": ("tests/data/sample_japanese.wav", 220.0),
+        "english": ("tests/data/sample_english.wav", 160.0),
+        "spanish": ("tests/data/sample_spanish.wav", 190.0),
+        "french": ("tests/data/sample_french.wav", 210.0),
+        "german": ("tests/data/sample_german.wav", 150.0),
+        "korean": ("tests/data/sample_korean.wav", 230.0),
+    }
+
+    generated = {}
+    for lang, (wav_path, f0) in languages_config.items():
+        out = generate_synthetic_wav(output_path=wav_path, duration_s=1.5, pitch_f0=f0)
+        generated[lang] = out
+
+    # Also ensure two_utterances sample is generated
+    generated["two_utterances"] = generate_synthetic_wav(
+        output_path="tests/data/sample_two_utterances.wav", duration_s=4.0, pitch_f0=200.0
+    )
+    return generated
+
+
 if __name__ == "__main__":
-    out = generate_synthetic_wav()
-    print(f"Generated sample wav at: {out}")
+    results = generate_all_language_samples()
+    for name, p in results.items():
+        print(f"Generated {name} sample wav at: {p}")
+

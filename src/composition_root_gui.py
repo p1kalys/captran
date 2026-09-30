@@ -29,7 +29,7 @@ from src.infrastructure.settings.local_settings_repository import (
     LocalSettingsRepository,
 )
 from src.infrastructure.stt.faster_whisper_stt import FasterWhisperTranscriber
-from src.infrastructure.translation.argos_translator import ArgosTranslateTranslator
+from src.infrastructure.translation.pivoting_translator import PivotingTranslator
 from src.infrastructure.ui.control_window import ControlWindow
 from src.infrastructure.ui.overlay_presenter import OverlayCaptionPresenter
 from src.infrastructure.vocabulary.json_custom_vocabulary import (
@@ -107,15 +107,22 @@ class LiveCaptionerGUIController:
 
     def _on_control_settings_changed(self, changes: dict) -> None:
         """Update and persist settings when user modifies control panel options."""
-        device_idx = changes.get("selected_audio_device")
+        device_idx = changes.get("selected_audio_device", self.settings.selected_audio_device)
         model_size = changes.get("whisper_model_size", self.settings.whisper_model_size)
         dual_subtitles = changes.get("dual_subtitles", self.settings.dual_subtitles)
+        source_language = changes.get(
+            "source_language",
+            changes.get("source_language_mode", self.settings.source_language_mode),
+        )
+        target_language = changes.get("target_language", self.settings.target_language)
 
         self.settings = replace(
             self.settings,
             selected_audio_device=device_idx,
             whisper_model_size=model_size,
             dual_subtitles=dual_subtitles,
+            source_language_mode=source_language,
+            target_language=target_language,
         )
         self.settings_repo.save(self.settings)
         self.presenter.apply_settings(self.settings)
@@ -135,12 +142,19 @@ class LiveCaptionerGUIController:
 
         device_index = config.get("device_index", self.settings.selected_audio_device)
         model_size = config.get("model_size", self.settings.whisper_model_size)
+        source_language = config.get(
+            "source_language",
+            config.get("source_language_mode", self.settings.source_language_mode),
+        )
+        target_language = config.get("target_language", self.settings.target_language)
 
         # Update settings
         self.settings = replace(
             self.settings,
             selected_audio_device=device_index,
             whisper_model_size=model_size,
+            source_language_mode=source_language,
+            target_language=target_language,
         )
         self.settings_repo.save(self.settings)
 
@@ -165,10 +179,10 @@ class LiveCaptionerGUIController:
             task="transcribe",
             fallback_to_base=self.settings.fallback_to_base,
         )
-        translator = ArgosTranslateTranslator(
-            from_code="ja",
-            to_code="en",
-        )
+        translator = PivotingTranslator()
+
+        src_lang = source_language if source_language != "auto" else "ja"
+        tgt_lang = target_language
 
         # Wire into Application Use Case via Dependency Injection
         self._use_case = LiveCaptionUseCase(
@@ -177,6 +191,8 @@ class LiveCaptionerGUIController:
             transcriber=transcriber,
             translator=translator,
             presenter=self.presenter,
+            source_language=src_lang,
+            target_language=tgt_lang,
             vocabulary=self.vocabulary_repo,
             status_callback=self._on_status_callback,
             debug_latency=self.debug_latency,

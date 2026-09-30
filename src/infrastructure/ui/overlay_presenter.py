@@ -9,15 +9,16 @@ Provides a modern, draggable, translucent, frameless, always-on-top subtitle ove
 
 from collections import deque
 import html
+from pathlib import Path
 import sys
-from typing import Deque, Optional, Tuple
+from typing import Deque, Dict, List, Optional, Tuple, Union
 
-from src.domain.entities import CaptionSegment, Settings
+from src.domain.entities import CaptionSegment, Language, Settings
 from src.domain.ports import CaptionPresenter
 
 try:
     from PySide6.QtCore import QObject, QPoint, Qt, Signal, Slot
-    from PySide6.QtGui import QColor, QFont, QGuiApplication, QMouseEvent, QPainter
+    from PySide6.QtGui import QColor, QFont, QFontDatabase, QGuiApplication, QMouseEvent, QPainter
     from PySide6.QtWidgets import (
         QApplication,
         QHBoxLayout,
@@ -30,6 +31,64 @@ except ImportError:
     QObject = object  # type: ignore
     Signal = lambda *args: None  # type: ignore
     Slot = lambda *args: lambda fn: fn  # type: ignore
+    QFontDatabase = None  # type: ignore
+
+
+LANGUAGE_FONT_FAMILIES: Dict[Language, List[str]] = {
+    Language.HINDI: ["Nirmala UI", "Mangal", "Aparajita", "Utsaah", "Noto Sans Devanagari", "Segoe UI"],
+    Language.JAPANESE: ["Meiryo", "Yu Gothic", "MS PGothic", "MS Gothic", "Noto Sans CJK JP", "Segoe UI"],
+    Language.KOREAN: ["Malgun Gothic", "Batang", "Dotum", "Gulim", "Noto Sans CJK KR", "Segoe UI"],
+    Language.ENGLISH: ["Segoe UI", "Arial", "Helvetica Neue", "Noto Sans"],
+    Language.SPANISH: ["Segoe UI", "Arial", "Helvetica Neue", "Noto Sans"],
+    Language.FRENCH: ["Segoe UI", "Arial", "Helvetica Neue", "Noto Sans"],
+    Language.GERMAN: ["Segoe UI", "Arial", "Helvetica Neue", "Noto Sans"],
+}
+
+UNIVERSAL_FONT_STACK = (
+    '"Segoe UI", "Nirmala UI", "Malgun Gothic", "Yu Gothic", "Meiryo", '
+    '"Noto Sans Devanagari", "Noto Sans CJK KR", "Noto Sans CJK JP", "Noto Sans", Arial, sans-serif'
+)
+
+
+def load_bundled_fonts() -> List[str]:
+    """Scan and register any bundled TTF/OTF fonts in assets/fonts or models/fonts directories."""
+    loaded_families: List[str] = []
+    if QFontDatabase is None:
+        return loaded_families
+
+    search_dirs = [
+        Path(__file__).parent / "fonts",
+        Path(__file__).parent.parent.parent.parent / "assets" / "fonts",
+        Path(__file__).parent.parent.parent.parent / "models" / "fonts",
+    ]
+    for d in search_dirs:
+        if d.is_dir():
+            for font_file in d.glob("*.[to]tf"):
+                try:
+                    font_id = QFontDatabase.addApplicationFont(str(font_file.resolve()))
+                    if font_id >= 0:
+                        families = QFontDatabase.applicationFontFamilies(font_id)
+                        loaded_families.extend(families)
+                except Exception:
+                    pass
+    return loaded_families
+
+
+def get_font_stack_for_language(lang: Optional[Union[str, Language]]) -> str:
+    """Return an optimal CSS font-family string with glyph coverage for the specified language."""
+    if lang is None:
+        return UNIVERSAL_FONT_STACK
+
+    try:
+        lang_enum = Language.from_code(lang) if isinstance(lang, str) else lang
+    except Exception:
+        lang_enum = None
+
+    preferred = LANGUAGE_FONT_FAMILIES.get(lang_enum, ["Segoe UI", "Arial", "sans-serif"])
+    formatted = [f'"{f}"' if " " in f else f for f in preferred]
+    if "sans-serif" not in formatted:
+        formatted.append("sans-serif")
+    return ", ".join(formatted)
 
 
 class _CaptionBridge(QObject):
@@ -97,7 +156,7 @@ class CaptionOverlayWidget(QWidget):
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(0, 0, 0, 2)
 
-        self.title_label = QLabel("CAPTRAN | 🇯🇵 JAPANESE  ➔  🇬🇧 ENGLISH (SIDE-BY-SIDE LIVE)", self.container)
+        self.title_label = QLabel("CAPTRAN | LIVE MULTILINGUAL SUBTITLES", self.container)
         self.title_label.setStyleSheet("""
             color: rgba(255, 255, 255, 0.45);
             font-size: 11px;
@@ -128,11 +187,13 @@ class CaptionOverlayWidget(QWidget):
 
         container_layout.addLayout(header_layout)
 
+        load_bundled_fonts()
+
         # Subtitle Text Display Label
-        self.text_label = QLabel("Waiting for Japanese audio...", self.container)
+        self.text_label = QLabel("Listening for audio...", self.container)
         self.text_label.setWordWrap(True)
         self.text_label.setTextFormat(Qt.TextFormat.RichText)
-        self.text_label.setStyleSheet("color: #FFFFFF; font-family: 'Segoe UI', Arial, sans-serif;")
+        self.text_label.setStyleSheet(f"color: #FFFFFF; font-family: {UNIVERSAL_FONT_STACK};")
         container_layout.addWidget(self.text_label)
 
         main_layout.addWidget(self.container)
@@ -212,69 +273,84 @@ class CaptionOverlayWidget(QWidget):
         self._render_text()
 
     def _render_text(self) -> None:
-        """Build HTML string with side-by-side (2-column) Japanese and English subtitles."""
+        """Build HTML string with side-by-side (2-column) source and target subtitles."""
         sz = self.font_size
         badge_sz = max(10, sz - 4)
         dot_sz = max(10, sz - 4)
         rows_html = []
 
+        def _fmt_badge(val, default=""):
+            if val is None:
+                return default
+            if hasattr(val, "value"):
+                return str(val.value).upper()
+            return str(val).upper()
+
         # Committed final rows
         for cap in self._final_captions:
-            en_text = html.escape(cap.text)
-            ja_text = html.escape(cap.original_text.strip()) if cap.original_text else ""
+            tgt_text = html.escape(cap.text)
+            src_text = html.escape(cap.original_text.strip()) if cap.original_text else ""
+            src_badge = _fmt_badge(getattr(cap, "source_language", None), default="SRC")
+            tgt_badge = _fmt_badge(getattr(cap, "language", None), default="TGT")
+            src_font = get_font_stack_for_language(getattr(cap, "source_language", None))
+            tgt_font = get_font_stack_for_language(getattr(cap, "language", None))
 
-            if self.dual_subtitles and ja_text:
+            if self.dual_subtitles and src_text:
                 # Side-by-side 2-column view
                 rows_html.append(
                     f"<tr>"
                     f"<td style='width: 48%; vertical-align: top; padding: 3px 10px 3px 0px; "
-                    f"color: #CFD8DC; font-size: {sz}px; font-weight: 500; font-family: Meiryo, sans-serif; "
+                    f"color: #CFD8DC; font-size: {sz}px; font-weight: 500; font-family: {src_font}; "
                     f"text-shadow: 0px 1px 3px rgba(0,0,0,0.9); line-height: 1.35;'>"
-                    f"<span style='color: #80DEEA; font-size: {badge_sz}px; font-weight: 700; background: rgba(0,188,212,0.15); padding: 1px 5px; border-radius: 4px; margin-right: 6px;'>JA</span>{ja_text}"
+                    f"<span style='color: #80DEEA; font-size: {badge_sz}px; font-weight: 700; background: rgba(0,188,212,0.15); padding: 1px 5px; border-radius: 4px; margin-right: 6px;'>{src_badge}</span>{src_text}"
                     f"</td>"
                     f"<td style='width: 4%; vertical-align: middle; text-align: center; color: rgba(255,255,255,0.3); font-size: 14px;'>➔</td>"
                     f"<td style='width: 48%; vertical-align: top; padding: 3px 0px 3px 10px; "
-                    f"color: #FFFFFF; font-size: {sz}px; font-weight: 600; font-family: \"Segoe UI\", Arial, sans-serif; "
+                    f"color: #FFFFFF; font-size: {sz}px; font-weight: 600; font-family: {tgt_font}; "
                     f"text-shadow: 0px 1px 3px rgba(0,0,0,0.9); line-height: 1.35;'>"
-                    f"<span style='color: #A5D6A7; font-size: {badge_sz}px; font-weight: 700; background: rgba(76,175,80,0.18); padding: 1px 5px; border-radius: 4px; margin-right: 6px;'>EN</span>{en_text}"
+                    f"<span style='color: #A5D6A7; font-size: {badge_sz}px; font-weight: 700; background: rgba(76,175,80,0.18); padding: 1px 5px; border-radius: 4px; margin-right: 6px;'>{tgt_badge}</span>{tgt_text}"
                     f"</td>"
                     f"</tr>"
                 )
             else:
                 rows_html.append(
                     f"<tr>"
-                    f"<td colspan='3' style='padding: 3px 0px; color: #FFFFFF; font-size: {sz}px; font-weight: 600; "
-                    f"text-shadow: 0px 1px 3px rgba(0,0,0,0.9); line-height: 1.35;'>{en_text}</td>"
+                    f"<td colspan='3' style='padding: 3px 0px; color: #FFFFFF; font-size: {sz}px; font-weight: 600; font-family: {tgt_font}; "
+                    f"text-shadow: 0px 1px 3px rgba(0,0,0,0.9); line-height: 1.35;'>{tgt_text}</td>"
                     f"</tr>"
                 )
 
         # Interim active line (updating live)
         if self._current_interim_caption is not None:
             interim_cap = self._current_interim_caption
-            en_text = html.escape(interim_cap.text)
-            ja_text = html.escape(interim_cap.original_text.strip()) if interim_cap.original_text else ""
+            tgt_text = html.escape(interim_cap.text)
+            src_text = html.escape(interim_cap.original_text.strip()) if interim_cap.original_text else ""
+            src_badge = _fmt_badge(getattr(interim_cap, "source_language", None), default="SRC")
+            tgt_badge = _fmt_badge(getattr(interim_cap, "language", None), default="TGT")
+            src_font = get_font_stack_for_language(getattr(interim_cap, "source_language", None))
+            tgt_font = get_font_stack_for_language(getattr(interim_cap, "language", None))
 
-            if self.dual_subtitles and ja_text:
+            if self.dual_subtitles and src_text:
                 rows_html.append(
                     f"<tr>"
                     f"<td style='width: 48%; vertical-align: top; padding: 3px 10px 3px 0px; "
-                    f"color: #90CAF9; font-size: {sz}px; font-style: italic; font-family: Meiryo, sans-serif; "
+                    f"color: #90CAF9; font-size: {sz}px; font-style: italic; font-family: {src_font}; "
                     f"text-shadow: 0px 1px 3px rgba(0,0,0,0.9); line-height: 1.35;'>"
-                    f"<span style='color: #64B5F6; font-size: {badge_sz}px; font-weight: 700; font-style: normal; background: rgba(33,150,243,0.18); padding: 1px 5px; border-radius: 4px; margin-right: 6px;'>JA</span>{ja_text}"
+                    f"<span style='color: #64B5F6; font-size: {badge_sz}px; font-weight: 700; font-style: normal; background: rgba(33,150,243,0.18); padding: 1px 5px; border-radius: 4px; margin-right: 6px;'>{src_badge}</span>{src_text}"
                     f"</td>"
                     f"<td style='width: 4%; vertical-align: middle; text-align: center; color: #64B5F6; font-size: 14px;'>➔</td>"
                     f"<td style='width: 48%; vertical-align: top; padding: 3px 0px 3px 10px; "
-                    f"color: #64B5F6; font-size: {sz}px; font-style: italic; font-weight: 600; font-family: \"Segoe UI\", Arial, sans-serif; "
+                    f"color: #64B5F6; font-size: {sz}px; font-style: italic; font-weight: 600; font-family: {tgt_font}; "
                     f"text-shadow: 0px 1px 3px rgba(0,0,0,0.9); line-height: 1.35;'>"
-                    f"<span style='color: #81D4FA; font-size: {badge_sz}px; font-weight: 700; font-style: normal; background: rgba(3,169,244,0.18); padding: 1px 5px; border-radius: 4px; margin-right: 6px;'>EN</span>{en_text} <span style='color: #42A5F5; font-size: {dot_sz}px;'>●</span>"
+                    f"<span style='color: #81D4FA; font-size: {badge_sz}px; font-weight: 700; font-style: normal; background: rgba(3,169,244,0.18); padding: 1px 5px; border-radius: 4px; margin-right: 6px;'>{tgt_badge}</span>{tgt_text} <span style='color: #42A5F5; font-size: {dot_sz}px;'>●</span>"
                     f"</td>"
                     f"</tr>"
                 )
             else:
                 rows_html.append(
                     f"<tr>"
-                    f"<td colspan='3' style='padding: 3px 0px; color: #90CAF9; font-size: {sz}px; font-style: italic; "
-                    f"text-shadow: 0px 1px 3px rgba(0,0,0,0.9); line-height: 1.35;'>{en_text} <span style='color: #64B5F6; font-size: {dot_sz}px;'>●</span></td>"
+                    f"<td colspan='3' style='padding: 3px 0px; color: #90CAF9; font-size: {sz}px; font-style: italic; font-family: {tgt_font}; "
+                    f"text-shadow: 0px 1px 3px rgba(0,0,0,0.9); line-height: 1.35;'>{tgt_text} <span style='color: #64B5F6; font-size: {dot_sz}px;'>●</span></td>"
                     f"</tr>"
                 )
         elif self._current_interim_text:
@@ -287,7 +363,7 @@ class CaptionOverlayWidget(QWidget):
             )
 
         if not rows_html:
-            self.text_label.setText(f"<div style='color: rgba(255,255,255,0.4); font-size: {max(12, sz-2)}px;'>Listening for Japanese audio...</div>")
+            self.text_label.setText(f"<div style='color: rgba(255,255,255,0.4); font-size: {max(12, sz-2)}px;'>Listening for audio...</div>")
         else:
             self.text_label.setText(f"<table style='width: 100%; border-collapse: separate; border-spacing: 0px 4px;'>{''.join(rows_html)}</table>")
 
@@ -311,7 +387,7 @@ class CaptionOverlayWidget(QWidget):
             elif state == "running":
                 self.text_label.setText(
                     f"<div style='color: rgba(255,255,255,0.4); font-size: {max(12, sz-2)}px;'>"
-                    f"● Listening for Japanese audio...</div>"
+                    f"● Listening for audio...</div>"
                 )
 
     def clear_captions(self) -> None:

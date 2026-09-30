@@ -3,6 +3,7 @@
 from src.domain.entities import (
     AudioChunk,
     CaptionSegment,
+    Language,
     PipelineStatus,
     Settings,
     TranscriptSegment,
@@ -20,6 +21,7 @@ __all__ = [
     "AudioChunk",
     "TranscriptSegment",
     "CaptionSegment",
+    "Language",
     "Settings",
     "PipelineStatus",
     "AudioSource",

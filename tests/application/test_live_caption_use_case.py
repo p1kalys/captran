@@ -10,6 +10,7 @@ from src.application.live_caption_use_case import LiveCaptionUseCase
 from src.domain.entities import (
     AudioChunk,
     CaptionSegment,
+    Language,
     TranscriptSegment,
 )
 from src.domain.ports import (
@@ -55,7 +56,11 @@ class FakeTranscriber(Transcriber):
         self._responses = list(responses)
         self.call_count = 0
 
-    def transcribe(self, audio: AudioChunk) -> Sequence[TranscriptSegment]:
+    def transcribe(
+        self,
+        audio: AudioChunk,
+        source_language: Language = Language.JAPANESE,
+    ) -> Sequence[TranscriptSegment]:
         self.call_count += 1
         if self._responses:
             return self._responses.pop(0)
@@ -71,9 +76,14 @@ class FakeTranslator(Translator):
             "テスト": "Test",
         }
 
-    def translate(self, japanese_text: str) -> str:
-        self.translated_queries.append(japanese_text)
-        return self._dictionary.get(japanese_text, f"[EN: {japanese_text}]")
+    def translate(
+        self,
+        text: str,
+        source_language: Language = Language.JAPANESE,
+        target_language: Language = Language.ENGLISH,
+    ) -> str:
+        self.translated_queries.append(text)
+        return self._dictionary.get(text, f"[EN: {text}]")
 
 
 class FakeCaptionPresenter(CaptionPresenter):
@@ -210,7 +220,7 @@ def test_direct_whisper_translation_bypasses_secondary_translator() -> None:
             TranscriptSegment(
                 text="Hello, thank you for joining.",
                 is_final=True,
-                language="en",
+                language=Language.ENGLISH,
                 start_time=0.0,
                 end_time=2.0,
             ),
@@ -229,13 +239,15 @@ def test_direct_whisper_translation_bypasses_secondary_translator() -> None:
         transcriber=transcriber,
         translator=translator,
         presenter=presenter,
+        source_language=Language.ENGLISH,
+        target_language=Language.ENGLISH,
     )
 
     captions = use_case.process_utterance(utterance)
     assert len(captions) == 1
     assert captions[0].text == "Hello, thank you for joining."
-    assert captions[0].language == "en"
-    # Translator was bypassed because segment was already in English
+    assert captions[0].language == Language.ENGLISH
+    # Translator was bypassed because source and target languages are both English
     assert len(translator.translated_queries) == 0
     assert len(presenter.received_captions) == 1
     assert presenter.received_captions[0].text == "Hello, thank you for joining."
@@ -250,9 +262,9 @@ def test_rolling_interim_chunks_and_final_reconciliation() -> None:
     chunk_final = AudioChunk(pcm_data=b"chunk_full_2.5s", is_final=True)
 
     stt_responses = [
-        [TranscriptSegment(text="こんにちは", is_final=True, language="ja")],
-        [TranscriptSegment(text="こんにちは、みなさん", is_final=True, language="ja")],
-        [TranscriptSegment(text="こんにちは、世界", is_final=True, language="ja")],
+        [TranscriptSegment(text="こんにちは", is_final=True, language=Language.JAPANESE)],
+        [TranscriptSegment(text="こんにちは、みなさん", is_final=True, language=Language.JAPANESE)],
+        [TranscriptSegment(text="こんにちは、世界", is_final=True, language=Language.JAPANESE)],
     ]
 
     audio_source = FakeAudioSource([])
@@ -304,7 +316,12 @@ def test_decoupled_pipeline_slow_translation_does_not_block_audio() -> None:
         def __init__(self) -> None:
             self.calls = 0
 
-        def translate(self, text: str) -> str:
+        def translate(
+            self,
+            text: str,
+            source_language: Language = Language.JAPANESE,
+            target_language: Language = Language.ENGLISH,
+        ) -> str:
             self.calls += 1
             time.sleep(0.08)  # simulate slow MT
             return f"Translated: {text}"
@@ -312,8 +329,8 @@ def test_decoupled_pipeline_slow_translation_does_not_block_audio() -> None:
     audio_source = FakeAudioSource(chunks)
     segmenter = FakeSpeechSegmenter(chunks)
     stt_responses = [
-        [TranscriptSegment(text="文1", is_final=True, language="ja")],
-        [TranscriptSegment(text="文2", is_final=True, language="ja")],
+        [TranscriptSegment(text="文1", is_final=True, language=Language.JAPANESE)],
+        [TranscriptSegment(text="文2", is_final=True, language=Language.JAPANESE)],
     ]
     transcriber = FakeTranscriber(stt_responses)
     translator = SlowTranslator()
@@ -365,3 +382,123 @@ def test_backpressure_drops_interims_preserves_finals() -> None:
     # Ensure final chunk is in the queue
     assert any(q.is_final for q in queued)
     assert any(q.pcm_data == b"final1" for q in queued)
+
+
+def test_session_direct_language_pair_translation() -> None:
+    """Session start with direct language pair (ja -> en)."""
+    utterance = AudioChunk(pcm_data=b"direct_audio", sample_rate=16000, is_final=True)
+    stt_responses = [
+        [TranscriptSegment(text="こんにちは", is_final=True, language=Language.JAPANESE)]
+    ]
+
+    audio_source = FakeAudioSource([])
+    segmenter = FakeSpeechSegmenter([utterance])
+    transcriber = FakeTranscriber(stt_responses)
+    translator = FakeTranslator()
+    presenter = FakeCaptionPresenter()
+
+    use_case = LiveCaptionUseCase(
+        audio_source=audio_source,
+        segmenter=segmenter,
+        transcriber=transcriber,
+        translator=translator,
+        presenter=presenter,
+        source_language=Language.JAPANESE,
+        target_language=Language.ENGLISH,
+    )
+
+    assert use_case.source_language == Language.JAPANESE
+    assert use_case.target_language == Language.ENGLISH
+
+    captions = use_case.process_utterance(utterance)
+    assert len(captions) == 1
+    assert captions[0].text == "Hello"
+    assert captions[0].original_text == "こんにちは"
+    assert captions[0].language == Language.ENGLISH
+    assert translator.translated_queries == ["こんにちは"]
+
+
+def test_session_pivot_required_language_pair_translation() -> None:
+    """Session start with pivot-required language pair (ja -> de)."""
+    utterance = AudioChunk(pcm_data=b"pivot_audio", sample_rate=16000, is_final=True)
+    stt_responses = [
+        [TranscriptSegment(text="こんにちは", is_final=True, language=Language.JAPANESE)]
+    ]
+
+    class PivotMockTranslator(Translator):
+        def __init__(self) -> None:
+            self.calls: List[Tuple[str, Language, Language]] = []
+
+        def translate(self, text: str, source_language: Language, target_language: Language) -> str:
+            self.calls.append((text, source_language, target_language))
+            return f"Hallo ({text})"
+
+    audio_source = FakeAudioSource([])
+    segmenter = FakeSpeechSegmenter([utterance])
+    transcriber = FakeTranscriber(stt_responses)
+    translator = PivotMockTranslator()
+    presenter = FakeCaptionPresenter()
+
+    use_case = LiveCaptionUseCase(
+        audio_source=audio_source,
+        segmenter=segmenter,
+        transcriber=transcriber,
+        translator=translator,
+        presenter=presenter,
+        source_language=Language.JAPANESE,
+        target_language=Language.GERMAN,
+    )
+
+    assert use_case.source_language == Language.JAPANESE
+    assert use_case.target_language == Language.GERMAN
+
+    captions = use_case.process_utterance(utterance)
+    assert len(captions) == 1
+    assert captions[0].text == "Hallo (こんにちは)"
+    assert captions[0].original_text == "こんにちは"
+    assert captions[0].language == Language.GERMAN
+
+    # Verify translator received both source and target language parameters
+    assert len(translator.calls) == 1
+    assert translator.calls[0] == ("こんにちは", Language.JAPANESE, Language.GERMAN)
+
+
+def test_session_same_language_passthrough_skips_translation() -> None:
+    """Session start with identical source and target language (es -> es) skips translation."""
+    utterance = AudioChunk(pcm_data=b"same_lang_audio", sample_rate=16000, is_final=True)
+    stt_responses = [
+        [TranscriptSegment(text="Hola amigos, bienvenidos", is_final=True, language=Language.SPANISH)]
+    ]
+
+    class UntouchedTranslator(Translator):
+        def __init__(self) -> None:
+            self.called = False
+
+        def translate(self, text: str, source_language: Language, target_language: Language) -> str:
+            self.called = True
+            return text
+
+    audio_source = FakeAudioSource([])
+    segmenter = FakeSpeechSegmenter([utterance])
+    transcriber = FakeTranscriber(stt_responses)
+    translator = UntouchedTranslator()
+    presenter = FakeCaptionPresenter()
+
+    use_case = LiveCaptionUseCase(
+        audio_source=audio_source,
+        segmenter=segmenter,
+        transcriber=transcriber,
+        translator=translator,
+        presenter=presenter,
+        source_language=Language.SPANISH,
+        target_language=Language.SPANISH,
+    )
+
+    captions = use_case.process_utterance(utterance)
+    assert len(captions) == 1
+    assert captions[0].text == "Hola amigos, bienvenidos"
+    assert captions[0].original_text == ""
+    assert captions[0].language == Language.SPANISH
+    # Translation skipped completely
+    assert translator.called is False
+

@@ -13,6 +13,7 @@ from src.application.live_caption_use_case import LiveCaptionUseCase
 from src.domain.entities import (
     AudioChunk,
     CaptionSegment,
+    Language,
     TranscriptSegment,
 )
 from src.domain.ports import (
@@ -99,13 +100,17 @@ def test_latency_tracker_bounded_deque_and_disabled() -> None:
 
 
 class DummyTranscriber(Transcriber):
-    def transcribe(self, audio: AudioChunk) -> Sequence[TranscriptSegment]:
+    def transcribe(
+        self,
+        audio: AudioChunk,
+        source_language: Language = Language.JAPANESE,
+    ) -> Sequence[TranscriptSegment]:
         time.sleep(0.01)  # small simulated latency
         return [
             TranscriptSegment(
                 text="こんにちは世界",
                 is_final=True,
-                language="ja",
+                language=source_language,
                 start_time=0.0,
                 end_time=1.0,
             )
@@ -113,7 +118,12 @@ class DummyTranscriber(Transcriber):
 
 
 class DummyTranslator(Translator):
-    def translate(self, japanese_text: str) -> str:
+    def translate(
+        self,
+        text: str,
+        source_language: Language = Language.JAPANESE,
+        target_language: Language = Language.ENGLISH,
+    ) -> str:
         time.sleep(0.005)
         return "Hello world"
 

@@ -11,6 +11,7 @@ from typing import Iterator, Sequence
 from src.domain.entities import (
     AudioChunk,
     CaptionSegment,
+    Language,
     Settings,
     TranscriptSegment,
 )
@@ -55,8 +56,12 @@ class Transcriber(ABC):
     """Abstract port for speech-to-text transcription."""
 
     @abstractmethod
-    def transcribe(self, audio: AudioChunk) -> Sequence[TranscriptSegment]:
-        """Transcribe an audio segment into interim and final Japanese TranscriptSegments."""
+    def transcribe(
+        self,
+        audio: AudioChunk,
+        source_language: Language,
+    ) -> Sequence[TranscriptSegment]:
+        """Transcribe an audio segment into TranscriptSegments in the source_language."""
         raise NotImplementedError
 
     def reset(self) -> None:
@@ -67,8 +72,13 @@ class Translator(ABC):
     """Abstract port for machine translation."""
 
     @abstractmethod
-    def translate(self, japanese_text: str) -> str:
-        """Translate Japanese text into English text."""
+    def translate(
+        self,
+        text: str,
+        source_language: Language,
+        target_language: Language,
+    ) -> str:
+        """Translate text from source_language to target_language."""
         raise NotImplementedError
 
 

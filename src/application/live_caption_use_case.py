@@ -18,12 +18,13 @@ Features:
 from queue import Empty, Full, Queue
 import threading
 import time
-from typing import Callable, Iterator, List, Optional, Tuple
+from typing import Callable, Iterator, List, Optional, Tuple, Union
 
 from src.application.latency_tracker import LatencyTracker
 from src.domain.entities import (
     AudioChunk,
     CaptionSegment,
+    Language,
     PipelineStatus,
     TranscriptSegment,
 )
@@ -54,6 +55,8 @@ class LiveCaptionUseCase:
         speech_to_text: Optional[Transcriber] = None,
         translation: Optional[Translator] = None,
         caption_display: Optional[CaptionPresenter] = None,
+        source_language: Union[str, Language] = Language.JAPANESE,
+        target_language: Union[str, Language] = Language.ENGLISH,
         debug_latency: bool = False,
         latency_report_interval_s: float = 30.0,
         latency_tracker: Optional[LatencyTracker] = None,
@@ -66,6 +69,16 @@ class LiveCaptionUseCase:
         self._transcriber = transcriber or speech_to_text  # type: ignore
         self._translator = translator or translation  # type: ignore
         self._presenter = presenter or caption_display  # type: ignore
+        self._source_language = (
+            Language.from_code(source_language)
+            if isinstance(source_language, str)
+            else source_language
+        )
+        self._target_language = (
+            Language.from_code(target_language)
+            if isinstance(target_language, str)
+            else target_language
+        )
         self._vocabulary = vocabulary
 
         # Configure initial prompt hint on transcriber if available
@@ -167,6 +180,16 @@ class LiveCaptionUseCase:
         return self._current_status
 
     @property
+    def source_language(self) -> Language:
+        """Get the configured session source language."""
+        return self._source_language
+
+    @property
+    def target_language(self) -> Language:
+        """Get the configured session target language."""
+        return self._target_language
+
+    @property
     def latency_tracker(self) -> LatencyTracker:
         """Get the latency tracking instrumentation instance."""
         return self._latency_tracker
@@ -207,7 +230,7 @@ class LiveCaptionUseCase:
         # 2. Speech-to-Text Transcription with Graceful Degradation
         t_stt_start = time.perf_counter()
         try:
-            transcript_segments = self._transcriber.transcribe(utterance)
+            transcript_segments = self._transcriber.transcribe(utterance, self._source_language)
         except Exception as stt_err:
             t_stt_end = time.perf_counter()
             self._report_status(
@@ -244,38 +267,41 @@ class LiveCaptionUseCase:
 
             # 3. Machine Translation (interim + final)
             t_trans_start = time.perf_counter()
-            if trans_seg.language == "en" or self._translator is None:
-                ja_text = ""
-                en_text = self._apply_target_substitutions(seg_text)
+            if self._source_language == self._target_language or self._translator is None:
+                orig_text = ""
+                target_text = self._apply_target_substitutions(seg_text)
             else:
                 # Pre-translation source substitution pass
-                ja_text = self._apply_source_substitutions(seg_text)
+                orig_text = self._apply_source_substitutions(seg_text)
                 try:
-                    en_res = self._translator.translate(ja_text)
+                    en_res = self._translator.translate(
+                        orig_text, self._source_language, self._target_language
+                    )
                     if hasattr(en_res, "translated_text"):
-                        en_text = en_res.translated_text
+                        target_text = en_res.translated_text
                     else:
-                        en_text = str(en_res)
+                        target_text = str(en_res)
                 except Exception as trans_err:
                     self._report_status(
                         state="degraded",
                         message=f"Translation failed: {trans_err}. Displaying original text.",
                     )
-                    en_text = f"[JA] {ja_text}"
+                    target_text = f"[{self._source_language.value.upper()}] {orig_text}"
 
                 # Post-translation target substitution pass
-                en_text = self._apply_target_substitutions(en_text)
+                target_text = self._apply_target_substitutions(target_text)
 
             t_trans_end = time.perf_counter()
             translation_duration_ms += (t_trans_end - t_trans_start) * 1000.0
 
             caption = CaptionSegment(
-                text=en_text,
+                text=target_text,
                 is_final=is_segment_final,
                 start_time=trans_seg.start_time,
                 end_time=trans_seg.end_time,
-                language="en" if (self._translator is not None or trans_seg.language == "en") else trans_seg.language,
-                original_text=ja_text,
+                language=self._target_language if self._translator is not None else self._source_language,
+                original_text=orig_text,
+                source_language=self._source_language,
             )
 
             # 4. Caption Display / Presentation
@@ -497,7 +523,7 @@ class LiveCaptionUseCase:
 
             try:
                 t_stt_start = time.perf_counter()
-                transcript_segments = self._transcriber.transcribe(utterance)
+                transcript_segments = self._transcriber.transcribe(utterance, self._source_language)
                 t_stt_end = time.perf_counter()
                 stt_ms = (t_stt_end - t_stt_start) * 1000.0
             except Exception as stt_err:
@@ -515,32 +541,35 @@ class LiveCaptionUseCase:
                 is_segment_final = is_utterance_final and getattr(trans_seg, "is_final", True)
 
                 if not is_segment_final:
-                    # Interim: Translate Japanese interim with secondary translator if present
+                    # Interim: Translate interim with secondary translator if present
                     t_trans_start = time.perf_counter()
-                    if trans_seg.language != "en" and self._translator is not None:
-                        ja_text = self._apply_source_substitutions(seg_text)
+                    if self._source_language != self._target_language and self._translator is not None:
+                        orig_text = self._apply_source_substitutions(seg_text)
                         try:
-                            en_res = self._translator.translate(ja_text)
+                            en_res = self._translator.translate(
+                                orig_text, self._source_language, self._target_language
+                            )
                             if hasattr(en_res, "translated_text"):
-                                en_text = en_res.translated_text
+                                target_text = en_res.translated_text
                             else:
-                                en_text = str(en_res)
+                                target_text = str(en_res)
                         except Exception:
-                            en_text = seg_text
-                        en_text = self._apply_target_substitutions(en_text)
+                            target_text = seg_text
+                        target_text = self._apply_target_substitutions(target_text)
                     else:
-                        en_text = self._apply_target_substitutions(seg_text)
-                        ja_text = seg_text if trans_seg.language != "en" else ""
+                        target_text = self._apply_target_substitutions(seg_text)
+                        orig_text = seg_text if self._source_language != self._target_language else ""
                     t_trans_end = time.perf_counter()
                     interim_trans_ms = (t_trans_end - t_trans_start) * 1000.0
 
                     interim_caption = CaptionSegment(
-                        text=en_text,
+                        text=target_text,
                         is_final=False,
                         start_time=trans_seg.start_time,
                         end_time=trans_seg.end_time,
-                        language="en" if (self._translator is not None or trans_seg.language == "en") else trans_seg.language,
-                        original_text=ja_text,
+                        language=self._target_language if self._translator is not None else self._source_language,
+                        original_text=orig_text,
+                        source_language=self._source_language,
                     )
                     t_disp_start = time.perf_counter()
                     try:
@@ -561,20 +590,21 @@ class LiveCaptionUseCase:
                         display_ms=disp_ms,
                         total_pipeline_ms=total_pipeline_ms,
                         e2e_latency_ms=audio_to_vad_ms + total_pipeline_ms,
-                        text_preview=en_text,
+                        text_preview=target_text,
                     )
                 else:
                     # Final segment
-                    if trans_seg.language == "en" or self._translator is None:
+                    if self._source_language == self._target_language or self._translator is None:
                         # Direct translation / no secondary MT needed: commit immediately
-                        en_text = self._apply_target_substitutions(seg_text)
+                        target_text = self._apply_target_substitutions(seg_text)
                         final_caption = CaptionSegment(
-                            text=en_text,
+                            text=target_text,
                             is_final=True,
                             start_time=trans_seg.start_time,
                             end_time=trans_seg.end_time,
-                            language="en",
+                            language=self._target_language if self._translator is not None else self._source_language,
                             original_text="",
+                            source_language=self._source_language,
                         )
                         t_disp_start = time.perf_counter()
                         try:
@@ -595,7 +625,7 @@ class LiveCaptionUseCase:
                             display_ms=disp_ms,
                             total_pipeline_ms=total_pipeline_ms,
                             e2e_latency_ms=audio_to_vad_ms + total_pipeline_ms,
-                            text_preview=en_text,
+                            text_preview=target_text,
                         )
                     else:
                         # Queue to Translation Worker (never drop final segments)
@@ -632,28 +662,31 @@ class LiveCaptionUseCase:
                 break
 
             trans_seg, utterance, t_pipeline_start, audio_to_vad_ms, stt_ms = item
-            raw_ja_text = trans_seg.text.strip()
-            ja_text = self._apply_source_substitutions(raw_ja_text)
+            raw_src_text = trans_seg.text.strip()
+            src_text = self._apply_source_substitutions(raw_src_text)
 
             t_trans_start = time.perf_counter()
             try:
-                en_res = self._translator.translate(ja_text)
-                en_text = en_res.translated_text if hasattr(en_res, "translated_text") else str(en_res)
+                en_res = self._translator.translate(
+                    src_text, self._source_language, self._target_language
+                )
+                target_text = en_res.translated_text if hasattr(en_res, "translated_text") else str(en_res)
             except Exception as trans_err:
                 self._report_status("degraded", f"Translation error: {trans_err}")
-                en_text = f"[JA] {ja_text}"
+                target_text = f"[{self._source_language.value.upper()}] {src_text}"
 
-            en_text = self._apply_target_substitutions(en_text)
+            target_text = self._apply_target_substitutions(target_text)
             t_trans_end = time.perf_counter()
             translation_ms = (t_trans_end - t_trans_start) * 1000.0
 
             caption = CaptionSegment(
-                text=en_text,
+                text=target_text,
                 is_final=True,
                 start_time=trans_seg.start_time,
                 end_time=trans_seg.end_time,
-                language="en",
-                original_text=ja_text,
+                language=self._target_language,
+                original_text=src_text,
+                source_language=self._source_language,
             )
 
             t_disp_start = time.perf_counter()
@@ -677,7 +710,7 @@ class LiveCaptionUseCase:
                 display_ms=disp_ms,
                 total_pipeline_ms=total_pipeline_ms,
                 e2e_latency_ms=e2e_latency_ms,
-                text_preview=en_text,
+                text_preview=target_text,
             )
 
             self._translation_queue.task_done()

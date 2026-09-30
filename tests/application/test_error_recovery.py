@@ -7,6 +7,7 @@ from src.application.live_caption_use_case import LiveCaptionUseCase
 from src.domain.entities import (
     AudioChunk,
     CaptionSegment,
+    Language,
     PipelineStatus,
     TranscriptSegment,
 )
@@ -59,7 +60,11 @@ class FailingTranscriber(Transcriber):
     def __init__(self) -> None:
         self.call_count = 0
 
-    def transcribe(self, audio: AudioChunk) -> Sequence[TranscriptSegment]:
+    def transcribe(
+        self,
+        audio: AudioChunk,
+        source_language: Language = Language.JAPANESE,
+    ) -> Sequence[TranscriptSegment]:
         self.call_count += 1
         if self.call_count == 1:
             raise RuntimeError("CUDA Out of Memory or CTranslate2 execution failed.")
@@ -69,6 +74,7 @@ class FailingTranscriber(Transcriber):
                 is_final=True,
                 start_time=0.0,
                 end_time=1.0,
+                language=source_language,
             )
         ]
 
@@ -76,7 +82,12 @@ class FailingTranscriber(Transcriber):
 class FailingTranslator(Translator):
     """Simulates a translation engine that fails."""
 
-    def translate(self, japanese_text: str) -> str:
+    def translate(
+        self,
+        text: str,
+        source_language: Language = Language.JAPANESE,
+        target_language: Language = Language.ENGLISH,
+    ) -> str:
         raise ValueError("Argos model corrupted or pivot route unavailable.")
 
 
@@ -92,8 +103,11 @@ def test_audio_device_disconnect_and_automatic_reconnect() -> None:
     audio_source = FlakyAudioSource()
     segmenter = PassThroughSegmenter()
     transcriber = FailingTranscriber()  # call 1 fails, call 2 succeeds
-    translator = lambda: None
-    trans_mock = type("MockTrans", (Translator,), {"translate": lambda s, t: "Hello"})()
+    trans_mock = type(
+        "MockTrans",
+        (Translator,),
+        {"translate": lambda s, t, src=Language.JAPANESE, tgt=Language.ENGLISH: "Hello"},
+    )()
     presenter = RecordingPresenter()
 
     statuses: List[PipelineStatus] = []
@@ -129,7 +143,11 @@ def test_audio_device_disconnect_and_automatic_reconnect() -> None:
 
 def test_stt_failure_graceful_degradation() -> None:
     transcriber = FailingTranscriber()
-    translator = type("MockTrans", (Translator,), {"translate": lambda s, t: "Hello"})()
+    translator = type(
+        "MockTrans",
+        (Translator,),
+        {"translate": lambda s, t, src=Language.JAPANESE, tgt=Language.ENGLISH: "Hello"},
+    )()
     presenter = RecordingPresenter()
     statuses: List[PipelineStatus] = []
 
@@ -160,8 +178,8 @@ def test_translation_failure_graceful_fallback() -> None:
         "MockSTT",
         (Transcriber,),
         {
-            "transcribe": lambda s, a: [
-                TranscriptSegment(text="ありがとう", is_final=True)
+            "transcribe": lambda s, a, src=Language.JAPANESE: [
+                TranscriptSegment(text="ありがとう", is_final=True, language=src)
             ]
         },
     )()
@@ -191,7 +209,11 @@ def test_thread_safe_shutdown_from_any_state() -> None:
     audio_source = FlakyAudioSource()
     segmenter = PassThroughSegmenter()
     transcriber = FailingTranscriber()
-    translator = type("MockTrans", (Translator,), {"translate": lambda s, t: "Test"})()
+    translator = type(
+        "MockTrans",
+        (Translator,),
+        {"translate": lambda s, t, src=Language.JAPANESE, tgt=Language.ENGLISH: "Test"},
+    )()
     presenter = RecordingPresenter()
 
     use_case = LiveCaptionUseCase(

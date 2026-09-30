@@ -54,11 +54,13 @@ coverage.xml
 htmlcov/
 
 # Large Machine Learning Model Weights & Checkpoints (>100MB)
-# (Whisper weights are downloadable via scripts/prepare_offline_models.py)
+# (Whisper weights & Argos packages are downloadable via scripts/setup_models.py)
 models/whisper/
+models/argos_packages/
 models/*.bin
 models/*.pt
 models/*.safetensors
+*.argosmodel
 
 # Allow lightweight models & ONNX assets (<50MB) to be tracked in Git
 !models/*.onnx

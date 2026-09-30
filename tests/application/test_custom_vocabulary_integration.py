@@ -4,28 +4,49 @@ from typing import Sequence
 import pytest
 
 from src.application.live_caption_use_case import LiveCaptionUseCase
-from src.domain.entities import AudioChunk, CaptionSegment, CustomVocabulary, TranscriptSegment
-from src.domain.ports import AudioSource, CaptionPresenter, SpeechSegmenter, Transcriber, Translator
+from src.domain.entities import (
+    AudioChunk,
+    CaptionSegment,
+    CustomVocabulary,
+    Language,
+    TranscriptSegment,
+)
+from src.domain.ports import (
+    AudioSource,
+    CaptionPresenter,
+    SpeechSegmenter,
+    Transcriber,
+    Translator,
+)
 
 
 class FakeSTT(Transcriber):
     def __init__(self):
         self.initial_prompt = ""
 
-    def transcribe(self, audio: AudioChunk) -> Sequence[TranscriptSegment]:
+    def transcribe(
+        self,
+        audio: AudioChunk,
+        source_language: Language = Language.JAPANESE,
+    ) -> Sequence[TranscriptSegment]:
         return [
             TranscriptSegment(
                 text="キャプトランの最新機能です。",
                 is_final=True,
-                language="ja",
+                language=source_language,
             )
         ]
 
 
 class FakeTranslator(Translator):
-    def translate(self, japanese_text: str) -> str:
-        # If source substitution occurred, CapTran is in japanese_text
-        if "CapTran" in japanese_text:
+    def translate(
+        self,
+        text: str,
+        source_language: Language = Language.JAPANESE,
+        target_language: Language = Language.ENGLISH,
+    ) -> str:
+        # If source substitution occurred, CapTran is in text
+        if "CapTran" in text:
             return "This is the latest feature of CapTran."
         return "This is the latest feature of cap tran."
 

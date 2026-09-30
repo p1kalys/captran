@@ -35,8 +35,19 @@ except ImportError:
 from src.domain.entities import PipelineStatus, Settings
 
 
+SUPPORTED_LANGUAGES = [
+    ("Hindi (hi)", "hi"),
+    ("Japanese (ja)", "ja"),
+    ("English (en)", "en"),
+    ("Spanish (es)", "es"),
+    ("French (fr)", "fr"),
+    ("German (de)", "de"),
+    ("Korean (ko)", "ko"),
+]
+
+
 class ControlWindow(QWidget):
-    """Small modern desktop control panel for JA->EN Live Captioner."""
+    """Small modern desktop control panel for CapTran Live Captioner."""
 
     start_requested = Signal(dict)   # Emits config dict when starting
     stop_requested = Signal()         # Emits when stopping
@@ -52,7 +63,8 @@ class ControlWindow(QWidget):
         self._is_running = False
 
         self.setWindowTitle("CapTran Control Panel")
-        self.setFixedSize(440, 320)
+        self.setMinimumSize(460, 390)
+        self.resize(460, 390)
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -84,6 +96,11 @@ class ControlWindow(QWidget):
                 padding: 6px 10px;
                 color: #FFFFFF;
                 min-height: 24px;
+            }
+            QComboBox:disabled {
+                background-color: #161922;
+                color: rgba(255, 255, 255, 0.35);
+                border: 1px solid rgba(255, 255, 255, 0.08);
             }
             QComboBox::drop-down {
                 border: none;
@@ -120,15 +137,31 @@ class ControlWindow(QWidget):
         layout.setSpacing(12)
 
         # Header Title
-        title_label = QLabel("🇯🇵 ➔ 🌐 CapTran Live Japanese ➔ English Captioner (ja->en)")
+        title_label = QLabel("🌐 CapTran Live Multilingual Captioner")
         title_label.setStyleSheet("font-size: 16px; font-weight: 700; color: #ECEFF4;")
         layout.addWidget(title_label)
 
         # Settings Group
-        settings_group = QGroupBox("Audio & Model Configuration")
+        settings_group = QGroupBox("Language & Audio Configuration")
         form_layout = QFormLayout(settings_group)
         form_layout.setContentsMargins(8, 12, 8, 8)
         form_layout.setSpacing(10)
+
+        # Source Language Selection (7 supported languages, no auto-detect)
+        self.source_lang_combo = QComboBox()
+        for label, code in SUPPORTED_LANGUAGES:
+            self.source_lang_combo.addItem(label, code)
+        self.source_lang_combo.setCurrentIndex(1)  # Default: Japanese (ja)
+        self.source_lang_combo.currentIndexChanged.connect(self._on_setting_modified)
+        form_layout.addRow("Source Language:", self.source_lang_combo)
+
+        # Target Language Selection (7 supported languages, default: English)
+        self.target_lang_combo = QComboBox()
+        for label, code in SUPPORTED_LANGUAGES:
+            self.target_lang_combo.addItem(label, code)
+        self.target_lang_combo.setCurrentIndex(2)  # Default: English (en)
+        self.target_lang_combo.currentIndexChanged.connect(self._on_setting_modified)
+        form_layout.addRow("Target Language:", self.target_lang_combo)
 
         # Device Selection
         self.device_combo = QComboBox()
@@ -141,13 +174,13 @@ class ControlWindow(QWidget):
 
         # Whisper Model Selection
         self.model_combo = QComboBox()
-        self.model_combo.addItems(["tiny", "base", "small"])
+        self.model_combo.addItems(["tiny", "base", "small", "medium", "large-v3"])
         self.model_combo.setCurrentText("small")
         self.model_combo.currentIndexChanged.connect(self._on_setting_modified)
         form_layout.addRow("Whisper Model:", self.model_combo)
 
         # Dual Subtitle Mode Checkbox
-        self.dual_subtitles_check = QCheckBox("Enable Dual Subtitles (Stacked JA + EN)")
+        self.dual_subtitles_check = QCheckBox("Enable Dual Subtitles (Source + Target)")
         self.dual_subtitles_check.setChecked(True)
         self.dual_subtitles_check.stateChanged.connect(self._on_setting_modified)
         form_layout.addRow("Display Mode:", self.dual_subtitles_check)
@@ -166,6 +199,15 @@ class ControlWindow(QWidget):
         self.toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.toggle_btn.clicked.connect(self._on_toggle_clicked)
         layout.addWidget(self.toggle_btn)
+
+        self._update_start_button_state()
+
+    def _update_start_button_state(self) -> None:
+        """Enable Start button only if source and target languages are selected."""
+        has_src = bool(self.source_lang_combo.currentData())
+        has_tgt = bool(self.target_lang_combo.currentData())
+        if not self._is_running:
+            self.toggle_btn.setEnabled(has_src and has_tgt)
 
     @Slot(object)
     def update_status(self, status: PipelineStatus) -> None:
@@ -205,13 +247,32 @@ class ControlWindow(QWidget):
         if idx >= 0:
             self.model_combo.setCurrentIndex(idx)
 
+        # Source language
+        src_code = getattr(settings, "source_language_mode", "ja")
+        if src_code == "auto":
+            src_code = "ja"
+        src_idx = self.source_lang_combo.findData(src_code)
+        if src_idx >= 0:
+            self.source_lang_combo.setCurrentIndex(src_idx)
+
+        # Target language
+        tgt_code = getattr(settings, "target_language", "en")
+        tgt_idx = self.target_lang_combo.findData(tgt_code)
+        if tgt_idx >= 0:
+            self.target_lang_combo.setCurrentIndex(tgt_idx)
+
         self.dual_subtitles_check.setChecked(getattr(settings, "dual_subtitles", True))
+        self._update_start_button_state()
 
     def _on_setting_modified(self) -> None:
         """Emit notification when dropdown options are changed."""
+        self._update_start_button_state()
         self.settings_changed.emit({
             "selected_audio_device": self.device_combo.currentData(),
             "whisper_model_size": self.model_combo.currentText(),
+            "source_language_mode": self.source_lang_combo.currentData(),
+            "source_language": self.source_lang_combo.currentData(),
+            "target_language": self.target_lang_combo.currentData(),
             "dual_subtitles": self.dual_subtitles_check.isChecked(),
         })
 
@@ -235,6 +296,8 @@ class ControlWindow(QWidget):
             config = {
                 "device_index": self.device_combo.currentData(),
                 "model_size": self.model_combo.currentText(),
+                "source_language": self.source_lang_combo.currentData(),
+                "target_language": self.target_lang_combo.currentData(),
             }
             self.set_running_state(True)
             self.start_requested.emit(config)
@@ -247,6 +310,9 @@ class ControlWindow(QWidget):
         self._is_running = running
         self.device_combo.setEnabled(not running)
         self.model_combo.setEnabled(not running)
+        self.source_lang_combo.setEnabled(not running)
+        self.target_lang_combo.setEnabled(not running)
+        self.dual_subtitles_check.setEnabled(not running)
 
         if running:
             self.toggle_btn.setText("Stop Live Captioning")
@@ -255,3 +321,5 @@ class ControlWindow(QWidget):
         else:
             self.toggle_btn.setText("Start Live Captioning")
             self.toggle_btn.setStyleSheet("background-color: #2E7D32;")
+            self._update_start_button_state()
+

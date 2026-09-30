@@ -14,14 +14,17 @@ import difflib
 from pathlib import Path
 import sys
 import time
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 # Add project root to sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 from src.application.latency_tracker import LatencyTracker
 from src.application.live_caption_use_case import LiveCaptionUseCase
-from src.domain.entities import AudioChunk, CaptionSegment, TranscriptSegment
+from src.domain.entities import AudioChunk, CaptionSegment, Language, TranscriptSegment
 from src.domain.ports import AudioSource, CaptionPresenter, SpeechSegmenter, Transcriber, Translator
 
 
@@ -159,7 +162,7 @@ class SimulatedTranslator(Translator):
             "現在の進捗状況としては、バックエンドのAPI実装が完了し、テスト環境へのデプロイ準備が整っています。": "As for the current progress, the backend API implementation is complete, and preparation for deployment to the test environment is ready.",
         }
 
-    def translate(self, japanese_text: str) -> str:
+    def translate(self, japanese_text: str, source_language: Optional[Language] = None, target_language: Optional[Language] = None) -> str:
         if japanese_text in self.dictionary:
             return self.dictionary[japanese_text]
         # Partial interim approximation
@@ -172,105 +175,116 @@ class SimulatedTranslator(Translator):
 
 
 def run_sweep():
-    print("\n" + "=" * 105)
-    print("  VAD SILENCE-TIMEOUT & INTERIM-WINDOW PARAMETER SWEEP BENCHMARK")
-    print("  Corpus: 3 Japanese Business/Meeting Utterances (Short Ack, Clause Hesitation, Status Report)")
-    print("=" * 105, flush=True)
+    print("\n" + "=" * 125)
+    print("  VAD SILENCE-TIMEOUT & INTERIM-WINDOW PARAMETER SWEEP BENCHMARK (MULTILINGUAL & PIVOT PATHS)")
+    print("  Corpus: 3 Multilingual Meeting Utterances (Short Ack, Clause Hesitation, Status Report)")
+    print("=" * 125, flush=True)
 
     silence_timeouts = [300.0, 500.0, 800.0]
     interim_windows = [1.0, 1.5, 2.0]
 
     translator = SimulatedTranslator()
-    stt_base_latency_ms = 720.0  # Faster-Whisper Small INT8 benchmark base
 
-    results_table = []
+    scenarios = [
+        ("Small STT + Direct (JA->EN)", 720.0, 18.0, False),
+        ("Small STT + Pivot Latency (JA->ES)", 720.0, 42.0, True),
+        ("Medium STT + Direct (JA->EN)", 1350.0, 18.0, False),
+        ("Medium STT + Pivot Latency (JA->ES)", 1350.0, 42.0, True),
+    ]
 
-    for s_timeout in silence_timeouts:
-        for i_window in interim_windows:
-            segmenter = SimulatedMeetingVADSegmenter(
-                silence_timeout_ms=s_timeout,
-                interim_interval_ms=i_window * 1000.0,
-                emit_interim=True,
+    for sc_name, stt_base_latency_ms, trans_time, is_pivot in scenarios:
+        print(f"\n--- Scenario: {sc_name} (STT Base: {stt_base_latency_ms}ms, MT: {trans_time}ms) ---")
+        if is_pivot:
+            print("    * Note: Accuracy metric reflects shared JA->EN simulation; pivot target text accuracy is not evaluated.")
+        results_table = []
+
+        for s_timeout in silence_timeouts:
+            for i_window in interim_windows:
+                segmenter = SimulatedMeetingVADSegmenter(
+                    silence_timeout_ms=s_timeout,
+                    interim_interval_ms=i_window * 1000.0,
+                    emit_interim=True,
+                )
+
+                all_interim_latencies = []
+                all_final_latencies = []
+                turn_accuracy_scores = []
+                total_segments_created = 0
+                premature_cutoffs = 0
+
+                for rec in MEETING_RECORDINGS:
+                    emitted_segments = segmenter.simulate_turn_segments(rec)
+                    total_segments_created += len(emitted_segments)
+
+                    final_hypotheses = []
+                    for text, is_final, seg_dur in emitted_segments:
+                        stt_time = stt_base_latency_ms + (seg_dur * 60.0)
+
+                        if is_final:
+                            # End-to-End Final Latency = Silence timeout wait + STT inference + Translation + Display
+                            e2e_final = s_timeout + stt_time + trans_time + 1.0
+                            all_final_latencies.append(e2e_final)
+
+                            en_text = translator.translate(text, Language.JAPANESE, Language.ENGLISH)
+                            final_hypotheses.append(en_text)
+                        else:
+                            # End-to-End Interim Latency = Interim emission interval + Partial STT inference + Translation
+                            e2e_interim = (i_window * 1000.0 * 0.5) + (stt_time * 0.45) + trans_time + 1.0
+                            all_interim_latencies.append(e2e_interim)
+
+                    # Evaluate accuracy on concatenated final turn captions
+                    full_hypothesis = " ".join(final_hypotheses)
+                    score = compute_word_overlap(full_hypothesis, rec["ref_en"])
+
+                    # Check if premature cutoff occurred on this turn
+                    if len(final_hypotheses) > 1 and rec["has_mid_pause"]:
+                        premature_cutoffs += 1
+                        # Split clause context penalty in translation
+                        score *= 0.82
+
+                    turn_accuracy_scores.append(score)
+
+                all_interim_latencies.sort()
+                all_final_latencies.sort()
+
+                i_p50 = all_interim_latencies[len(all_interim_latencies)//2] if all_interim_latencies else 0.0
+                i_p95 = all_interim_latencies[int(len(all_interim_latencies)*0.95)] if all_interim_latencies else 0.0
+                f_p50 = all_final_latencies[len(all_final_latencies)//2] if all_final_latencies else 0.0
+                f_p95 = all_final_latencies[int(len(all_final_latencies)*0.95)] if all_final_latencies else 0.0
+                avg_acc = (sum(turn_accuracy_scores) / len(turn_accuracy_scores)) * 100.0
+
+                results_table.append({
+                    "silence_timeout_ms": int(s_timeout),
+                    "interim_window_s": i_window,
+                    "interim_p50": i_p50,
+                    "interim_p95": i_p95,
+                    "final_p50": f_p50,
+                    "final_p95": f_p95,
+                    "accuracy": avg_acc,
+                    "cutoffs": premature_cutoffs,
+                    "total_segments": total_segments_created,
+                })
+
+        acc_header = "JA->EN Sim Acc" if is_pivot else "Accuracy"
+        print(f" {'Silence Timeout':<16} | {'Interim Win':<12} | {'Interim p50':>12} | {'Interim p95':>12} | {'Final p50':>11} | {'Final p95':>11} | {acc_header:>14} | {'Cutoffs':>8}")
+        print("-" * 119)
+        for r in results_table:
+            is_rec = (r["silence_timeout_ms"] == 500 and r["interim_window_s"] == 1.0)
+            marker = " (Optimal)" if is_rec else ""
+            print(
+                f" {r['silence_timeout_ms']:>4} ms          | "
+                f" {r['interim_window_s']:>4.1f} s       | "
+                f" {r['interim_p50']:>9.1f} ms | "
+                f" {r['interim_p95']:>9.1f} ms | "
+                f" {r['final_p50']:>8.1f} ms | "
+                f" {r['final_p95']:>8.1f} ms | "
+                f" {r['accuracy']:>12.1f}% | "
+                f" {r['cutoffs']:>4} / 3{marker}"
             )
 
-            all_interim_latencies = []
-            all_final_latencies = []
-            turn_accuracy_scores = []
-            total_segments_created = 0
-            premature_cutoffs = 0
-
-            for rec in MEETING_RECORDINGS:
-                emitted_segments = segmenter.simulate_turn_segments(rec)
-                total_segments_created += len(emitted_segments)
-
-                final_hypotheses = []
-                for text, is_final, seg_dur in emitted_segments:
-                    stt_time = stt_base_latency_ms + (seg_dur * 60.0)
-                    trans_time = 15.0  # ArgosTranslate latency
-
-                    if is_final:
-                        # End-to-End Final Latency = Silence timeout wait + STT inference + Translation + Display
-                        e2e_final = s_timeout + stt_time + trans_time + 1.0
-                        all_final_latencies.append(e2e_final)
-
-                        en_text = translator.translate(text)
-                        final_hypotheses.append(en_text)
-                    else:
-                        # End-to-End Interim Latency = Interim emission interval + Partial STT inference + Translation
-                        e2e_interim = (i_window * 1000.0 * 0.5) + (stt_time * 0.45) + trans_time + 1.0
-                        all_interim_latencies.append(e2e_interim)
-
-                # Evaluate accuracy on concatenated final turn captions
-                full_hypothesis = " ".join(final_hypotheses)
-                score = compute_word_overlap(full_hypothesis, rec["ref_en"])
-
-                # Check if premature cutoff occurred on this turn
-                if len(final_hypotheses) > 1 and rec["has_mid_pause"]:
-                    premature_cutoffs += 1
-                    # Split clause context penalty in translation
-                    score *= 0.82
-
-                turn_accuracy_scores.append(score)
-
-            all_interim_latencies.sort()
-            all_final_latencies.sort()
-
-            i_p50 = all_interim_latencies[len(all_interim_latencies)//2] if all_interim_latencies else 0.0
-            i_p95 = all_interim_latencies[int(len(all_interim_latencies)*0.95)] if all_interim_latencies else 0.0
-            f_p50 = all_final_latencies[len(all_final_latencies)//2] if all_final_latencies else 0.0
-            f_p95 = all_final_latencies[int(len(all_final_latencies)*0.95)] if all_final_latencies else 0.0
-            avg_acc = (sum(turn_accuracy_scores) / len(turn_accuracy_scores)) * 100.0
-
-            results_table.append({
-                "silence_timeout_ms": int(s_timeout),
-                "interim_window_s": i_window,
-                "interim_p50": i_p50,
-                "interim_p95": i_p95,
-                "final_p50": f_p50,
-                "final_p95": f_p95,
-                "accuracy": avg_acc,
-                "cutoffs": premature_cutoffs,
-                "total_segments": total_segments_created,
-            })
-
-    print("\n" + "=" * 115)
-    print(f" {'Silence Timeout':<16} | {'Interim Win':<12} | {'Interim p50':>12} | {'Interim p95':>12} | {'Final p50':>11} | {'Final p95':>11} | {'Accuracy':>10} | {'Cutoffs':>8}")
-    print("-" * 115)
-    for r in results_table:
-        is_rec = (r["silence_timeout_ms"] == 500 and r["interim_window_s"] == 1.0)
-        marker = " (Best)" if is_rec else ""
-        print(
-            f" {r['silence_timeout_ms']:>4} ms          | "
-            f" {r['interim_window_s']:>4.1f} s       | "
-            f" {r['interim_p50']:>9.1f} ms | "
-            f" {r['interim_p95']:>9.1f} ms | "
-            f" {r['final_p50']:>8.1f} ms | "
-            f" {r['final_p95']:>8.1f} ms | "
-            f" {r['accuracy']:>8.1f}% | "
-            f" {r['cutoffs']:>4} / 3{marker}"
-        )
-    print("=" * 115 + "\n")
+    print("\n" + "=" * 125 + "\n")
 
 
 if __name__ == "__main__":
     run_sweep()
+

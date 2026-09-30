@@ -29,7 +29,7 @@ def test_argos_translator_with_mock() -> None:
         "東京は日本の首都です": "Tokyo is the capital of Japan",
     }.get(t, f"Translated {t}")
 
-    translator._translation_model = mock_model
+    translator._translation_models[("ja", "en")] = mock_model
 
     test_cases = [
         ("こんにちは", ["hello"]),

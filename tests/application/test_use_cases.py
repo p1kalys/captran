@@ -4,6 +4,7 @@ from src.application.live_caption_use_case import LiveCaptionUseCase
 from src.domain.entities import (
     AudioChunk,
     CaptionSegment,
+    Language,
     TranscriptSegment,
 )
 from src.domain.ports import (
@@ -39,19 +40,20 @@ class MockSpeechSegmenter(SpeechSegmenter):
 
 
 class MockTranscriber(Transcriber):
-    def transcribe(self, audio):
+    def transcribe(self, audio, source_language=Language.JAPANESE):
         return [
             TranscriptSegment(
                 text="こんにちは",
                 is_final=True,
                 start_time=0.0,
                 end_time=1.0,
+                language=source_language,
             )
         ]
 
 
 class MockTranslator(Translator):
-    def translate(self, japanese_text):
+    def translate(self, text, source_language=Language.JAPANESE, target_language=Language.ENGLISH):
         return "Hello"
 
 

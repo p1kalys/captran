@@ -2,7 +2,7 @@
 
 ## Overview
 
-`captran` is designed using **Hexagonal Architecture (Ports and Adapters)**. The application captures Japanese audio from system/meeting output, detects speech utterances via offline VAD, transcribes Japanese speech with local Faster-Whisper, translates to English with local Argos Translate, and displays live side-by-side subtitles—**with zero cloud or network dependencies** once offline models/assets are loaded locally.
+`captran` is designed using **Hexagonal Architecture (Ports and Adapters)**. The application captures system/meeting audio output, detects speech utterances via offline VAD, transcribes speech across 7 supported languages with local Faster-Whisper, translates offline with local Argos Translate (via direct models or automated 2-hop English pivot routing across all 42 language pairs), and displays live side-by-side subtitles—**with zero cloud or network dependencies** once offline models/assets are loaded locally.
 
 ---
 
@@ -53,18 +53,18 @@ flowchart TD
     end
 
     subgraph STT["Worker 3: Speech-to-Text"]
-        Q2 -->|Coalesce Interim Snapshots| C[Faster-Whisper INT8]
+        Q2 -->|Coalesce Interim Snapshots| C[Faster-Whisper Multilingual INT8/FP16]
         C -->|Interim Captions| P[Caption Presenter]
         C -->|Final Utterances| Q3[Bounded Translation Queue]
     end
 
     subgraph MT["Worker 4: Machine Translation"]
-        Q3 --> D[Argos Translate ja->en]
+        Q3 --> D[Argos Translate Direct & English-Pivot MT]
         D -->|Final Subtitles| P
     end
 
     subgraph UI["Presentation Layer"]
-        P --> E1["PySide6 Side-by-Side Overlay [JA] ➔ [EN]"]
+        P --> E1["PySide6 Side-by-Side Overlay [SRC] ➔ [TGT]"]
         P --> E2["Terminal CLI Presenter"]
     end
 ```
@@ -83,7 +83,8 @@ flowchart TD
 - **Entities & Value Objects**:
   - `AudioChunk`: Immutable PCM slice with sample rate, channels, timestamp, and `is_final` flag.
   - `TranscriptSegment`: Transcribed text segment with timestamps, confidence, and language code.
-  - `CaptionSegment`: Presentation-ready subtitle containing English translation (`text`) and original Japanese (`original_text`).
+  - `CaptionSegment`: Presentation-ready subtitle containing target translation (`text`) and source speech (`original_text`).
+  - `Language`: Standardized language enumeration (`hi`, `ja`, `en`, `es`, `fr`, `de`, `ko`).
   - `CustomVocabulary`: Domain terms, prompt hints, and regex-safe pre/post-translation substitutions.
   - `Settings`: User preferences (font size, opacity, audio device, dual subtitles, VAD sensitivity).
   - `PipelineStatus`: Operational status (`idle`, `running`, `reconnecting`, `degraded`, `stopped`, `error`).
@@ -104,8 +105,11 @@ flowchart TD
 Contains concrete adapters that implement domain ports:
 - `infrastructure/audio/`: Windows WASAPI loopback audio capture via `pyaudiowpatch` and `AudioSourceFactory`.
 - `infrastructure/audio/silero_vad.py`: Offline ONNX Silero VAD segmenter with interim emission support.
-- `infrastructure/stt/faster_whisper_stt.py`: CTranslate2 INT8/float16 Faster-Whisper transcriber utilizing multi-core CPU scaling.
-- `infrastructure/translation/argos_translator.py`: Local offline Argos Translate model adapter.
+- `infrastructure/stt/faster_whisper_stt.py`: CTranslate2 INT8/float16 Faster-Whisper transcriber supporting 7 languages.
+- `infrastructure/translation/`:
+  - `argos_translator.py`: Direct offline Argos Translate model adapter.
+  - `pivoting_translator.py`: Automated 2-hop English-pivot translator supporting all 42 pair combinations.
+  - `adapter.py`: Offline translation adapter wrapping direct/pivot routing.
 - `infrastructure/vocabulary/json_custom_vocabulary.py`: Disk-persisted custom dictionary at `~/.ja-en-captioner/custom_vocab.json`.
 - `infrastructure/ui/`:
   - `overlay_presenter.py`: PySide6 frameless, draggable, translucent 2-column side-by-side overlay with HTML escaping.
@@ -115,7 +119,7 @@ Contains concrete adapters that implement domain ports:
 
 ### 4. Composition Roots
 - `src/composition_root_gui.py`: Wires together GUI adapters, settings persistence, and background worker threads.
-- `src/composition_root_cli.py`: Assembles adapters for headless terminal execution.
+- `src/composition_root_cli.py`: Assembles multilingual adapters for headless terminal execution.
 - `src/composition_root.py`: Dependency injection container and factory functions.
 - `main.py`: Top-level CLI entry point and argument dispatcher.
 
@@ -137,6 +141,9 @@ captran/
 │   ├── whisper/
 │   └── argos_packages/
 ├── scripts/
+│   ├── setup_models.py
+│   ├── check_argos_coverage.py
+│   ├── sweep_vad_params.py
 │   ├── prepare_offline_models.py
 │   ├── install_translation_model.py
 │   ├── bench_latency.py
@@ -163,7 +170,9 @@ captran/
     ├── domain/
     ├── application/
     ├── infrastructure/
+    ├── data/
     ├── test_composition_root.py
     ├── test_composition_root_cli.py
-    └── test_composition_root_gui.py
+    ├── test_composition_root_gui.py
+    └── test_multilingual_pipeline_integration.py
 ```
